@@ -1,0 +1,195 @@
+#!/usr/bin/env node
+import { readFileSync } from 'node:fs';
+import { callBridge } from './lib/prbridge.mjs';
+import { loadConfig } from './lib/config.mjs';
+
+function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
+
+// The cache is a flat JSON map keyed by a normalized sequence name (see panel
+// context-store.js: normSeqKey = trim + collapse whitespace). Reads fall back to
+// case-insensitive matching, mirroring the panel's findTranscriptEntry.
+function normSeqKey(name) { return String(name).trim().replace(/\s+/g, ' '); }
+
+function readTranscriptForActiveSequence(sequenceName) {
+  const cfg = loadConfig();
+  let raw;
+  try { raw = readFileSync(cfg.transcriptCachePath, 'utf8'); }
+  catch { return { found: false, reason: 'no_cache_file' }; }
+  let obj;
+  try { obj = JSON.parse(raw); } catch { return { found: false, reason: 'corrupt_cache' }; }
+  const key = normSeqKey(sequenceName);
+  let entry = obj[key];
+  if (!entry) {
+    const lower = key.toLowerCase();
+    const hit = Object.keys(obj).find((k) => normSeqKey(k).toLowerCase() === lower);
+    if (hit) entry = obj[hit];
+  }
+  if (!entry) return { found: false, reason: 'no_entry_for_sequence', sequenceName };
+  return { found: true, entry };
+}
+
+// Read a JSON payload either inline (--json '<...>') or from a file (--file path).
+// File form is preferred for large plans.
+function readPayloadArg(argv) {
+  const fileIdx = argv.indexOf('--file');
+  if (fileIdx !== -1) return JSON.parse(readFileSync(argv[fileIdx + 1], 'utf8'));
+  const jsonIdx = argv.indexOf('--json');
+  if (jsonIdx !== -1) return JSON.parse(argv[jsonIdx + 1]);
+  throw new Error('Provide --file <path> or --json <string>');
+}
+
+function argVal(argv, flag) { const i = argv.indexOf(flag); return i !== -1 ? argv[i + 1] : undefined; }
+
+// Guard a ripple-delete cut plan before applying. A backup exists, but this
+// catches obvious mistakes cheaply: each interval must be well-formed and within
+// [0, sequenceEndSec], intervals must not overlap, and the edit must leave at
+// least minKeepSec of footage. A HIGH removed ratio is expected for highlight
+// edits (keep 5 min of 60 → ~0.92 removed), so we report the ratio, never cap it.
+function validateCutPlan(ops, seqEndSec, minKeepSec) {
+  const intervals = [];
+  for (const op of ops) {
+    const s = Number(op.startSec), e = Number(op.endSec);
+    if (!Number.isFinite(s) || !Number.isFinite(e)) return { ok: false, reason: 'non_numeric_interval', op };
+    if (e <= s) return { ok: false, reason: 'empty_or_reversed_interval', op };
+    if (s < 0) return { ok: false, reason: 'negative_start', op };
+    if (seqEndSec != null && e > seqEndSec + 0.001) return { ok: false, reason: 'interval_past_end', op, seqEndSec };
+    intervals.push([s, e]);
+  }
+  intervals.sort((a, b) => a[0] - b[0]);
+  for (let i = 1; i < intervals.length; i++) {
+    if (intervals[i][0] < intervals[i - 1][1] - 0.001) {
+      return { ok: false, reason: 'overlapping_intervals', a: intervals[i - 1], b: intervals[i] };
+    }
+  }
+  const removedSec = intervals.reduce((sum, [s, e]) => sum + (e - s), 0);
+  const removedRatio = seqEndSec ? removedSec / seqEndSec : null;
+  if (seqEndSec != null) {
+    const keptSec = seqEndSec - removedSec;
+    if (keptSec < minKeepSec) return { ok: false, reason: 'leaves_too_little_footage', keptSec, minKeepSec, removedSec, removedRatio };
+  }
+  return { ok: true, removedSec, removedRatio };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const [cmd] = argv;
+  switch (cmd) {
+    case 'snapshot': {
+      const data = await callBridge('getTimelineSnapshot', []);
+      out(data);
+      break;
+    }
+    case 'backup': {
+      const data = await callBridge('backupActiveSequence', []);
+      out(data); // { ok, seqName, seqId }
+      break;
+    }
+    case 'transcribe': {
+      const snap = await callBridge('getTimelineSnapshot', []);
+      const seqName = snap && snap.sequenceName;
+      if (!seqName) { out({ ok: false, error: 'No active sequence' }); break; }
+      const res = readTranscriptForActiveSequence(seqName);
+      if (!res.found) {
+        out({
+          ok: false,
+          needsTranscription: true,
+          sequenceName: seqName,
+          reason: res.reason,
+          instruction: 'Open the "ИИ: монтаж" panel in Premiere and run transcription once for this sequence, then re-run pr.mjs transcribe.'
+        });
+        break;
+      }
+      out({ ok: true, sequenceName: seqName, transcript: res.entry });
+      break;
+    }
+    case 'cut': {
+      // payload: { ops: [ { type:"ripple_delete_interval", startSec, endSec }, ... ] }
+      // flags: --force (override guard), --min-keep-sec <n> (default 2)
+      const plan = readPayloadArg(argv);
+      if (!plan || !Array.isArray(plan.ops)) throw new Error('cut payload needs { ops: [...] }');
+      const force = argv.includes('--force');
+      const minKeepSec = Number(argVal(argv, '--min-keep-sec') ?? 2);
+      const snap = await callBridge('getTimelineSnapshot', []);
+      const seqEnd = snap && typeof snap.sequenceEndSec === 'number' ? snap.sequenceEndSec : null;
+      const check = validateCutPlan(plan.ops, seqEnd, minKeepSec);
+      if (!check.ok && !force) {
+        out({ ok: false, blocked: true, reason: check.reason, details: check, sequenceEndSec: seqEnd, hint: 'Fix the plan, or pass --force to override.' });
+        process.exit(1);
+      }
+      // Translate the skill's cut contract into the host's applyTimecodeEdits
+      // schema. The panel reads plan.operations (NOT plan.ops) and only knows
+      // the interval actions ripple_delete_range / lift_delete_range — the
+      // legacy "ripple_delete_interval" name is silently ignored (0 ops). Ripple
+      // is the default (closes the gap); pass mode:"lift" for a lift-delete.
+      // Apply interval deletes in DESCENDING startSec order. Each ripple delete
+      // shifts all later content left by its length, so a low-to-high order would
+      // make every subsequent interval's coordinates refer to already-shifted
+      // footage (deleting the wrong region). Deleting highest-first keeps every
+      // remaining interval's original-timeline coordinates valid. (Lift deletes
+      // don't shift, so descending is harmless for them too.)
+      const hostPlan = {
+        expectedSequenceName: snap && snap.sequenceName,
+        operations: plan.ops
+          .slice()
+          .sort((x, y) => Number(y.startSec) - Number(x.startSec))
+          .map((o) => ({
+            type: o.mode === 'lift' ? 'lift_delete_range' : 'ripple_delete_range',
+            startSec: Number(o.startSec),
+            endSec: Number(o.endSec),
+          })),
+      };
+      const data = await callBridge('applyTimecodeEdits', [hostPlan], { timeoutMs: 130000 });
+      out({ ...data, sequenceEndSec: seqEnd, removedSec: check.removedSec, removedRatio: check.removedRatio, forced: force && !check.ok });
+      break;
+    }
+    case 'markers': {
+      // payload: [ { startSec, name, comment, color }, ... ]
+      const markers = readPayloadArg(argv);
+      if (!Array.isArray(markers)) throw new Error('markers payload must be an array');
+      const data = await callBridge('addSequenceMarkers', [markers], { timeoutMs: 60000 });
+      out(data); // { ok, count }
+      break;
+    }
+    case 'reframe-sources': {
+      const data = await callBridge('getVerticalReframeSources', []);
+      out(data); // { ok, clips:[{nodeId,name,startSec},...] }
+      break;
+    }
+    case 'reframe': {
+      // payload: { clips: [ { nodeId, scalePercent, ... }, ... ] }
+      const plan = readPayloadArg(argv);
+      const data = await callBridge('applyVerticalReframe', [plan], { timeoutMs: 130000 });
+      out(data);
+      break;
+    }
+    case 'overlay': {
+      // payload: { filePath, startSec, ... }
+      const payload = readPayloadArg(argv);
+      const data = await callBridge('importAndOverlayOnTop', [payload], { timeoutMs: 130000 });
+      out(data);
+      break;
+    }
+    case 'import': {
+      // payload: { filePath, binName? }
+      const payload = readPayloadArg(argv);
+      const data = await callBridge('importMediaFile', [payload], { timeoutMs: 130000 });
+      out(data);
+      break;
+    }
+    case 'activate': {
+      // --by-id <seqId>  OR  --by-name <name>
+      const idIdx = argv.indexOf('--by-id');
+      const nameIdx = argv.indexOf('--by-name');
+      let data;
+      if (idIdx !== -1) data = await callBridge('activateSequenceById', [argv[idIdx + 1]]);
+      else if (nameIdx !== -1) data = await callBridge('activateSequenceByName', [{ name: argv[nameIdx + 1] }]);
+      else throw new Error('activate needs --by-id <id> or --by-name <name>');
+      out(data);
+      break;
+    }
+    default:
+      console.error('Usage: pr.mjs <snapshot|backup|transcribe|cut|markers|reframe-sources|reframe|overlay|import|activate>');
+      process.exit(2);
+  }
+}
+main().catch((e) => { console.error('ERROR:', e.message); process.exit(1); });

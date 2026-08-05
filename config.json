@@ -1,0 +1,12 @@
+{
+  "cdpPort": 8098,
+  "sidecarBaseUrl": "http://127.0.0.1:8765",
+  "repos": {
+    "llmChatPr": "C:/Users/Глеб/Documents/Extensions-LLM-Chat_Pr",
+    "phygital": "C:/Users/Глеб/Documents/Phygital-Adobe-Studio"
+  },
+  "transcriptCachePath": "C:/Users/Глеб/.extensions_llm_chat_pr/_llm_transcript_cache.json",
+  "sidecarTokenPath": "C:/Users/Глеб/AppData/Local/PhygitalStudio/sidecar.token",
+  "sidecarAppDir": "C:/Users/Глеб/Documents/Phygital-Adobe-Studio/sidecar",
+  "pythonExe": "C:/Users/Глеб/Documents/Phygital-Adobe-Studio/sidecar/.venv/Scripts/pythonw.exe"
+}

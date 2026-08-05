@@ -1,0 +1,7 @@
+# Per-session scratch: generated JSX, edit plans, transcript dumps, exported frames
+gen-out/
+
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
