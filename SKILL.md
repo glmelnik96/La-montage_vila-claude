@@ -12,6 +12,23 @@ editorial decisions; the skill's CLI helpers execute them against the running ap
 - Premiere open with the **"ИИ: монтаж"** panel (LLM-Chat_Pr) — gives CDP port 8098.
 - Phygital login done once via recon: `python -m scripts.cli auth login`.
 
+## Read this before touching anything
+
+**`gen-out/` is per-session scratch and is gitignored.** Leftover JSON plans,
+transcript dumps and one-off scripts in there belong to whatever project ran last.
+They are evidence, never method. Do not build a plan on top of them and do not
+assume a file you find there will exist next time.
+
+**Confirm which project is focused before any mutating call.** `app.project` is
+whichever project Premiere has focused, not the one you were working in a minute
+ago. Read `app.project.name` and the active sequence first; if more than one
+project is open, ask the user to close the others rather than guessing.
+
+**Numbers are not verification.** The panel host cannot return a rendered frame
+(`getFrameSources` returns clip metadata; `exportFramePNG`/`exportFrameJPEG` do not
+exist). Every visual claim has to be re-derived from the source media with ffmpeg
+and actually looked at. Duration, `W×H` and `opsOk` are necessary and never sufficient.
+
 ## Approval model (B — semi-auto)
 - One backup at the start; then run the pipeline autonomously.
 - **Only stop for confirmation before paid generations** (`gen.mjs` image/video/voice/upscale).
@@ -33,10 +50,11 @@ editorial decisions; the skill's CLI helpers execute them against the running ap
    - **Clarity (~0.15):** clean audio, no long filler/cross-talk.
    - **Novelty (~0.05):** avoid repeating a point already kept.
    Build a `cut` plan of `ripple_delete_interval` ops for the REMOVED ranges (everything
-   NOT kept). **Snap every cut boundary to speech, not to your target timecode:** use the
-   transcript's word/segment timings — start a KEEP at the first word of a sentence and end
-   it after the last word, then pad by ~300 ms of silence on each side so you never clip a
-   syllable or leave an orphaned half-word. Prefer cutting inside silences/pauses.
+   NOT kept). **Pick boundaries from the waveform, not from the transcript.** Use the
+   transcript to choose which sentences to keep, then measure each boundary with
+   `node scripts/audio.mjs check --src <media> --in <t> --out <t>` and aim the blade at the
+   MIDDLE of a pause. Whisper's segment timings drift by tenths of a second — cutting on
+   one routinely slices a syllable.
    Write the plan to a temp JSON file and apply: `node scripts/pr.mjs cut --file <plan.json>`.
 6. **Chapters (Claude)** — derive 5–10 chapter points from the transcript. Write a
    markers array and apply: `node scripts/pr.mjs markers --file <markers.json>`.
@@ -114,8 +132,67 @@ slide had no matching content at all), while the other two decks were accurate. 
 still ran in correct sequential order in every case. So: `Read` a few slides from each deck before
 trusting its filenames, and map by what you SEE.
 
+## Workflow C (multicam master → vertical reels)
+
+Use when the source is a **flattened multicam export** — one rendered file on the
+timeline, already cut between angles, so every clip boundary is a camera switch.
+
+**REQUIRED READING:** `references/vertical-reels.md` has the full technique. The
+short version, and the four ways it goes wrong:
+
+1. **Survey the angles by looking** — `node scripts/shots.mjs --src <media>` renders one
+   frame per clip. Read the sheet; derive each angle's face position `u` (fraction of
+   SOURCE width) and confirm it with `shots.mjs probe`. Never port a camera classifier
+   or a `u` table from another project — lighting and seating change every shoot.
+2. **Pick boundaries from the waveform, not the transcript** —
+   `node scripts/audio.mjs check --src <media> --in <t> --out <t>`. Aim at the middle
+   of a pause. Trust `fineDb` (5 ms), not `coarseDb` (50 ms).
+3. **Build in a duplicate**, ripple-delete outside `[start,end]`, then assert the
+   surviving source range matches before applying any Motion.
+4. **Compute the reframe with `scripts/vframe.mjs`** — never by hand.
+   `scalePct` is NOT the visible fraction: at `scalePct 88.889` a 3840-wide source
+   shows `1080/(3840·0.88889)` = **31.6 %** of its width. Position moves the image and
+   so is inverted, and legally exceeds `0..1`.
+5. **Frame wide/two-shots on the NEAREST close-up neighbour**, not on the reel's
+   dominant angle — `vframe.mjs plan` does this. The dominant-angle version passes
+   every numeric check and silently frames half the cutaways on a silent face.
+6. **Verify on pixels** — `node scripts/checkreframe.mjs --src <media> --seq "<name>"`
+   inverts the Motion values Premiere stored back into a crop. Read the image.
+7. **Leave the `_wip` sequences alone when you finish.** They are cheap, they are the
+   only record of what each reel was cut from, and re-deriving one costs another
+   multi-minute ripple delete. Report that they exist and let the user decide. Tidying
+   up unprompted is a destructive act on someone else's project.
+
+## Hard-won constraints
+
+**A bridge timeout is not a failure.** `applyTimecodeEdits` gives up at 120 s and
+`evalJson` at 30 s, but the edit keeps running inside Premiere. Ripple-deleting
+~1200 clips takes minutes. Re-issuing the call applies the edit TWICE. Correct
+response: catch the timeout, then poll a cheap read until the host answers again,
+and confirm the resulting state before continuing.
+
+**ExtendScript is ES3.** Anything newer silently is not there:
+- no arrow functions, no `let`/`const`, no template literals, no destructuring;
+- no `Array.prototype` `find` / `indexOf` on objects / `forEach` / `map` — write `for` loops;
+- no `JSON.parse` in some hosts (building strings by hand is safest);
+- reserved words — `short`, `int`, `char`, `class`, `enum`, `final`, `native`, `float`,
+  `double` — cannot be used even as object-literal keys.
+
+All of these fail at PARSE time, so an in-script `try/catch` cannot catch them and the
+only symptom is an opaque `raw=EvalScript error` with no line number. If a script that
+reads as valid JavaScript fails repeatedly, you are looking at a syntax-level ES3
+violation, not a logic bug. Write host scripts in plain ES3 from the start.
+
+**Confirm before removing anything.** Deleting intermediate `_wip` sequences, restoring
+a backup over current work, or clearing a bin are all destructive and none of them are
+implied by "make me some reels". Leave intermediates in place and ask.
+
+**Whisper timecodes drift by tenths of a second.** Use the transcript to decide
+WHAT to keep and the audio envelope to decide WHERE to cut. Every boundary gets
+measured against the waveform.
+
 ## Payload shapes
-These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT_PRM_`, v2.14.0).
+These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT_PRM_`, v2.16.1).
 - `cut` plan: `{ "ops": [ { "startSec":N, "endSec":N, "mode":"ripple" }, ... ] }`. `mode` is
   optional and defaults to `ripple` (closes the gap); pass `"lift"` to leave a gap. `pr.mjs`
   translates this into the host's `applyTimecodeEdits` schema (`{ operations:[{ type:"ripple_delete_range",
@@ -127,8 +204,10 @@ These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT
 - `reframe` plan: `{ "newName":"Reel …", "targetW":1080, "targetH":1920, "expectedSequenceName":"<src seq>",
   "items": [ { "trackIndex":N, "clipIndex":N, "scalePct":N, "posX":0.5, "posY":0.5 }, ... ] }`. It
   CLONES the whole active sequence into a vertical one and applies Motion Scale/Position per clip.
-  Get `trackIndex`/`clipIndex` from `reframe-sources` (it returns those, NOT a `nodeId`). To fill a
-  9:16 frame from a 1920×1080 source use `scalePct ≈ 178` (=1920/1080), `posX/posY = 0.5` = centered.
+  Get `trackIndex`/`clipIndex` from `reframe-sources` (it returns those, NOT a `nodeId`).
+  `scalePct` fills the frame HEIGHT at `1920/srcH·100` — 178 for a 1080-tall source, 88.889 for
+  2160-tall — and `posX/posY = 0.5` is centered. **Build the items with `scripts/vframe.mjs`**,
+  which prints the visible fraction and handles the inverted position math.
   Trim the resulting clone to the moment by activating it and running `cut` afterward.
 - `import` (add media to a project bin, non-destructive): `{ "path":"C:/.../asset.jpg", "binName":"AI Renders" }`
   — the host key is `path` (NOT `filePath`); defaults to bin `AI Renders`.
@@ -157,3 +236,4 @@ These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT
 - [ ] reel crops visually validated (ffmpeg frame simulation read; subjects survive the crop)
 - [ ] at least one generated asset inserted (after confirmation)
 - [ ] rollback verified: activate backup backupId restores original
+- [ ] intermediates still present and reported — NOT deleted on your own initiative
