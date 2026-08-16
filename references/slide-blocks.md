@@ -192,6 +192,14 @@ adjacent clips whose in/out touch), and the markers. Assert the collapsed ranges
 equal the plan's `keep`, and that every source sequence still has its original
 duration. A length match alone will not catch a block cut from the wrong place.
 
+**Also reset each clone's in/out.** A clone inherits the SOURCE sequence's in and
+out points, so a 40 s block still carries `out = 8811 s` — and some sources carry
+the unset sentinel `in = -400000`. Nothing in the timeline looks wrong and the
+collapsed-range check passes, but every export and every work-area operation then
+runs over two hours of nothing. Per block sequence: `setInPoint(0)` and
+`setOutPoint(Number(seq.end) / 254016000000)`. Batch it by module — `evalJson`
+gives up at 30 s.
+
 That proves the ripple delete removed what it was told to. It says nothing about
 whether what it was told to remove was right. Three more checks, cheapest first,
 and none of them subsumes the others:
