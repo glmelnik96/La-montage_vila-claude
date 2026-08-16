@@ -163,6 +163,43 @@ short version, and the four ways it goes wrong:
    multi-minute ripple delete. Report that they exist and let the user decide. Tidying
    up unprompted is a destructive act on someone else's project.
 
+## Workflow D (screen-shared lecture + PDF deck → one sequence per slide)
+
+Use when the lecturer **screen-shares a PDF deck** and the deliverable is one
+sequence per presentation block — junk (open Q&A, waiting to start, failed demos)
+removed, each sequence named after its slide.
+
+**REQUIRED READING:** `references/slide-blocks.md`. The short version:
+
+1. **Track the deck on screen** — `slidetrack.py calibrate` then `track`. A screen
+   share is never full-frame and the page is usually clipped by the viewer's toolbar
+   and a "Screen: …" banner; a view must exclude every overlay or every geometry
+   scores ≈0.5 and picks the wrong page.
+2. **If the deck is in a scrolling viewer, sweep the offset** — `scrollviews.py`.
+   Continuous scroll leaves the page at a different Y after every page turn; one view
+   matches 11 % of the module, twenty views match 40–50 % at correlation 0.94.
+3. **Read slides + deck text + transcript together** — `slidealign.py`, then
+   `trwin.py` for the stretches where no slide is on screen. The deck gives structure,
+   the transcript gives the boundary the speaker actually crossed.
+4. **Write a block plan** (blocks / dropped / pinned). Divider slides merge into their
+   neighbour; Q&A about the slide on screen stays; every boundary taken from the
+   transcript rather than the pixels gets a `СПОРНО:` marker naming the sentence.
+5. **Verify the plan on pixels before cutting** — `planverify.py` puts the frame at
+   each block start next to the page it claims. Read it in row-sized crops.
+6. **Snap to pauses** — `snapplan.mjs`, then review every move over ~2 s. It regularly
+   lands past the sentence that OPENS the block; pin those and record why.
+7. **Cut into clones** — `blockcut.mjs --dry-run`, then for real. Never cut the source
+   sequence: it is the only copy of the scene-detect edit.
+8. **Verify** collapsed source ranges and markers per created sequence, and that every
+   source sequence still has its original duration.
+9. **Verify the edit, not the mechanics** — a range match only proves the ripple
+   delete obeyed. Three separate checks: `planverify.py` (does the block open on the
+   slide it is named after), `edgecheck.mjs` (does any blade land inside a word),
+   `edgetext.mjs` (does the block open and close on a complete thought). The third
+   catches what the other two cannot: a boundary in a clean pause that is still the
+   middle of a sentence, which is what a slide-track boundary becomes whenever the
+   lecturer advances mid-sentence.
+
 ## Hard-won constraints
 
 **A bridge timeout is not a failure.** `applyTimecodeEdits` gives up at 120 s and
@@ -190,6 +227,11 @@ implied by "make me some reels". Leave intermediates in place and ask.
 **Whisper timecodes drift by tenths of a second.** Use the transcript to decide
 WHAT to keep and the audio envelope to decide WHERE to cut. Every boundary gets
 measured against the waveform.
+
+**The transcript cache is keyed by sequenceID, not by sequence name.** A lookup by
+name silently reports "never transcribed" for a sequence whose full transcript is
+sitting in the file, and the natural next move — re-running transcription — costs an
+hour. Look up `snapshot.sequenceId` first, and keep the name lookup only as a fallback.
 
 ## Payload shapes
 These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT_PRM_`, v2.16.1).

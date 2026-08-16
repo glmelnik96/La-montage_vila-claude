@@ -5,6 +5,7 @@
 //   node scripts/audio.mjs env    --src <media> --at <sec> [--span 4] [--hop 0.05]
 //   node scripts/audio.mjs pauses --src <media> --at <sec> [--span 6] [--thresh -40]
 //   node scripts/audio.mjs check  --src <media> --in <sec> --out <sec> [--thresh -40]
+//   node scripts/audio.mjs snap   --src <media> --at <sec,sec,...> [--span 6] [--thresh -40]
 import { execFileSync } from 'node:child_process';
 
 const SR = 48000;
@@ -76,6 +77,19 @@ export function check(src, t, thresh = -40) {
     driftToPause: closest ? +(mid(closest) - t).toFixed(3) : null
   };
 }
+// Move a boundary onto the best nearby silence. A cut derived from a slide track
+// or a transcript lands wherever the sampling grid fell, which is routinely
+// mid-syllable. Among the pauses within `span` of the target, prefer the longest
+// one and put the blade in its middle; a pause shorter than `minPause` is a
+// breath, not a phrase boundary, so it is ignored. Returns null when the target
+// sits in continuous speech — that is a fact worth seeing, not worth papering over.
+export function snap(src, t, span = 6, thresh = -40, minPause = 0.3) {
+  const gs = pauses(src, t, span, thresh).filter(g => g.d >= minPause);
+  if (!gs.length) return null;
+  const best = gs.slice().sort((a, b) => (b.d - a.d) || (dist(a, t) - dist(b, t)))[0];
+  return { t: +mid(best).toFixed(3), pause: best, moved: +(mid(best) - t).toFixed(3) };
+}
+
 const nearest = (env, t) => env.reduce((b, e) => (b && Math.abs(b.t - t) <= Math.abs(e.t - t) ? b : e), null);
 const mid = (g) => (g.s + g.e) / 2;
 const dist = (g, t) => (t >= g.s && t <= g.e ? 0 : Math.min(Math.abs(g.s - t), Math.abs(g.e - t)));
@@ -114,6 +128,15 @@ if (process.argv[1] && process.argv[1].endsWith('audio.mjs')) {
       console.log(`${label} ${r.t}  ${verdict}  fine ${r.fineDb} dB (coarse ${r.coarseDb} dB)` +
         `  pause ${r.pause ? r.pause.s.toFixed(3) + '..' + r.pause.e.toFixed(3) : 'none'}` +
         `  move ${r.driftToPause >= 0 ? '+' : ''}${r.driftToPause}s to centre it`);
+    }
+  } else if (mode === 'snap') {
+    const span = +arg('span', 6), th = +arg('thresh', -40), minPause = +arg('min-pause', 0.3);
+    for (const raw of String(arg('at', '')).split(',').filter(Boolean)) {
+      const t = +raw;
+      const s = snap(src, t, span, th, minPause);
+      console.log(s
+        ? `${t.toFixed(2)} -> ${s.t.toFixed(3)}  (${s.moved >= 0 ? '+' : ''}${s.moved}s, pause ${s.pause.d.toFixed(2)}s)`
+        : `${t.toFixed(2)} -> NO PAUSE within ${span}s — boundary sits on speech`);
     }
   } else { console.error(`unknown mode ${mode}`); process.exit(2); }
 }

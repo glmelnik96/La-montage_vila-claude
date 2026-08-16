@@ -5,26 +5,28 @@ import { loadConfig } from './lib/config.mjs';
 
 function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
 
-// The cache is a flat JSON map keyed by a normalized sequence name (see panel
-// context-store.js: normSeqKey = trim + collapse whitespace). Reads fall back to
-// case-insensitive matching, mirroring the panel's findTranscriptEntry.
+// The cache is a flat JSON map. Current panel builds key by sequenceID (a UUID);
+// older entries are keyed by a normalized sequence name (context-store.js:
+// normSeqKey = trim + collapse whitespace). Try the id first, then the name,
+// then case-insensitive name, mirroring the panel's findTranscriptEntry.
 function normSeqKey(name) { return String(name).trim().replace(/\s+/g, ' '); }
 
-function readTranscriptForActiveSequence(sequenceName) {
+function readTranscriptForActiveSequence(sequenceName, sequenceId) {
   const cfg = loadConfig();
   let raw;
   try { raw = readFileSync(cfg.transcriptCachePath, 'utf8'); }
   catch { return { found: false, reason: 'no_cache_file' }; }
   let obj;
   try { obj = JSON.parse(raw); } catch { return { found: false, reason: 'corrupt_cache' }; }
+  let entry = sequenceId ? obj[String(sequenceId)] : undefined;
   const key = normSeqKey(sequenceName);
-  let entry = obj[key];
+  if (!entry) entry = obj[key];
   if (!entry) {
     const lower = key.toLowerCase();
     const hit = Object.keys(obj).find((k) => normSeqKey(k).toLowerCase() === lower);
     if (hit) entry = obj[hit];
   }
-  if (!entry) return { found: false, reason: 'no_entry_for_sequence', sequenceName };
+  if (!entry) return { found: false, reason: 'no_entry_for_sequence', sequenceName, sequenceId };
   return { found: true, entry };
 }
 
@@ -88,7 +90,7 @@ async function main() {
       const snap = await callBridge('getTimelineSnapshot', []);
       const seqName = snap && snap.sequenceName;
       if (!seqName) { out({ ok: false, error: 'No active sequence' }); break; }
-      const res = readTranscriptForActiveSequence(seqName);
+      const res = readTranscriptForActiveSequence(seqName, snap && snap.sequenceId);
       if (!res.found) {
         out({
           ok: false,
