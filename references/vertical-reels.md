@@ -44,6 +44,13 @@ node scripts/shots.mjs probe --src <media> --at 4500 --u 0.61 --scale 88.889
 Adjust `u` until the face sits where you want it. Two or three iterations is
 normal. This is cheap and it is the only way to get `u` right.
 
+Labelling an angle "host" or "guest" from clothing is a guess. Confirm it against
+the edit: in a flattened master the camera follows the speaker, so find a
+question/answer handover in the transcript and check that the angle changes on
+it. On one shoot the branded T-shirt belonged to the guest's company but the
+*host* wore his own merch — the handover settled it in one look, and it also
+revealed that two of the reels were the host talking, not the expert.
+
 Once you know what each angle looks like you can classify the remaining clips
 however you like (sampling pixels for a distinctive lamp, a colour, a luma
 imbalance) — but **spot-check the classifier against the contact sheet**, and
@@ -68,6 +75,66 @@ sides. `check` reports the level at the cut and how far to move to centre it.
 reads as loud itself. This produced a confident "−18.3 dB, cutting into a word"
 alarm on a boundary that was actually sitting in a 70 ms gate. `audio.mjs check`
 reports both resolutions and decides on the fine one; trust `fineDb`.
+
+### When Whisper collapses 30 seconds into one segment
+
+Sometimes a segment arrives with a single start/end spanning half a minute of
+speech. A boundary inside it cannot be checked against the transcript at all —
+several sentences, often a speaker change, hidden behind two numbers. Find these
+before trusting any boundary, then reopen each one:
+
+```bash
+node -e "…segments.filter(s => s.endSec - s.startSec > 8)"   # then, per window:
+python scripts/rewin.py <media> 374 394
+```
+
+On a 65-minute podcast three such segments existed and two of them contained a
+reel boundary. Both boundaries were wrong: one ended a reel five seconds into the
+host's *next* question, the other opened a reel mid-clause.
+
+**Word timestamps tell you WHAT is said, never WHERE to cut.** They mislead in
+both directions:
+
+- Whisper reported a 0.96 s gap after the last word of a story. The 10 ms
+  envelope showed the room never dropped below −25 dB there — it was a reaction
+  from the other chair. The real gap was 60 ms, 0.9 s later.
+- Whisper reported a word ending at 3001.20. The envelope showed silence from
+  3000.89 — the word end was padded by a third of a second, and trusting it would
+  have moved a clean cut onto the next word.
+
+So the order is fixed: `rewin.py` to learn the sentence order and who is
+speaking, then `audio.mjs` to place the frame.
+
+### Re-read every boundary in context before you call a reel finished
+
+Hunting mega-segments is not enough, because the full-file pass drifts on
+*ordinary* segments too. Sweep all boundaries at the end, re-transcribing a
+±6 s window around each and printing the words that fall either side of the
+blade:
+
+```python
+ws = words(t - 6.5, t + 6.5)
+before = ' '.join(w for w in ws if w.end <= t)     # what the reel throws away
+after  = ' '.join(w for w in ws if w.start >= t)   # what it opens on
+```
+
+Read the two strings. A reel must open on a sentence start and end on a sentence
+end; anything else is a defect no numeric check can see.
+
+On the shoot above this pass ran *after* a structural audit that came back
+completely clean, and it still found two broken reels out of nine:
+
+- A reel opened 2.6 s late because the full-file transcript placed its first
+  sentence 3 s later than it really was. The reel threw away its own premise —
+  "I have a simple agent for a lawyer, let me share my experience" — and opened
+  on the example instead. Nothing about it looked wrong: the cut was in a clean
+  pause, the framing was right, the duration was sane.
+- A boundary shared by two adjacent reels fell *inside* a sentence, so the
+  opening clause of reel N+1 was left hanging on the end of reel N.
+
+Both are the same class of error — a plausible cut in a real silence that is
+nevertheless in the wrong silence. Budget for this pass; it is the cheapest part
+of the whole job and the only one that reads the reel as a viewer would.
 
 Judgement call at the head of a reel: a soft consonant onset (a nasal, a fricative)
 at around −30 dB is usually worth keeping rather than moving the cut a frame
@@ -172,7 +239,14 @@ Worth checking on every reel, cheaply, in one pass over the sequences:
 - video and audio clip counts equal, and identical source ranges (a drifted audio
   track means a ripple delete hit one track only);
 - zero gaps between consecutive clips;
+- surviving source range is contiguous and its head/tail equal the planned
+  `[start, end]` exactly;
+- frame size, and `in = 0` / `out = own end` (clones inherit the master's);
+- Motion present on every clip, at one of the scales in your map;
 - clips shorter than ~3 frames.
+
+This whole list is structural. Passing it says nothing about whether the reels
+make sense — see "Re-read every boundary in context" above, and run that too.
 
 On short clips: **not every short clip is a defect.** A 2-frame clip at the head
 of a reel is usually a flash frame of the previous angle and should go. A 7-frame

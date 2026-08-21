@@ -138,7 +138,7 @@ Use when the source is a **flattened multicam export** — one rendered file on 
 timeline, already cut between angles, so every clip boundary is a camera switch.
 
 **REQUIRED READING:** `references/vertical-reels.md` has the full technique. The
-short version, and the four ways it goes wrong:
+short version, and the ways it goes wrong:
 
 1. **Survey the angles by looking** — `node scripts/shots.mjs --src <media>` renders one
    frame per clip. Read the sheet; derive each angle's face position `u` (fraction of
@@ -158,7 +158,12 @@ short version, and the four ways it goes wrong:
    every numeric check and silently frames half the cutaways on a silent face.
 6. **Verify on pixels** — `node scripts/checkreframe.mjs --src <media> --seq "<name>"`
    inverts the Motion values Premiere stored back into a crop. Read the image.
-7. **Leave the `_wip` sequences alone when you finish.** They are cheap, they are the
+7. **Re-read every boundary in context before calling it done** — re-transcribe ±6 s
+   around each cut with `scripts/rewin.py` and print the words on either side. A reel
+   must open on a sentence start and close on a sentence end. On one nine-reel job this
+   pass ran after a structural audit that came back completely clean and still found two
+   reels opening mid-thought, because the full-file transcript had drifted 3 s.
+8. **Leave the `_wip` sequences alone when you finish.** They are cheap, they are the
    only record of what each reel was cut from, and re-deriving one costs another
    multi-minute ripple delete. Report that they exist and let the user decide. Tidying
    up unprompted is a destructive act on someone else's project.
@@ -223,6 +228,17 @@ violation, not a logic bug. Write host scripts in plain ES3 from the start.
 **Confirm before removing anything.** Deleting intermediate `_wip` sequences, restoring
 a backup over current work, or clearing a bin are all destructive and none of them are
 implied by "make me some reels". Leave intermediates in place and ask.
+
+**Deleting a sequence: `projectItem.deleteBin()` is a silent no-op.** It returns without
+throwing and the sequence is still there, so a delete loop reports success on every item
+and changes nothing. Use `app.project.deleteSequence(seq)`. Either way, `numSequences`
+is stale for the rest of that script execution — re-read the list in a FRESH call before
+believing anything was removed.
+
+**Rename, do not delete, when re-cutting a reel.** Move the old version to an `_OLD_`
+prefix, rebuild under the real name, verify the rebuild, and only then delete. A rebuild
+costs a multi-minute ripple delete; a rename costs nothing and keeps the fallback alive
+across the window where you have neither version verified.
 
 **Whisper timecodes drift by tenths of a second.** Use the transcript to decide
 WHAT to keep and the audio envelope to decide WHERE to cut. Every boundary gets
