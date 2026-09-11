@@ -205,6 +205,25 @@ removed, each sequence named after its slide.
    middle of a sentence, which is what a slide-track boundary becomes whenever the
    lecturer advances mid-sentence.
 
+## Workflow E (reviewer notes → corrected edit → episodes)
+
+Use when a first draft of a long recording has come back with review notes
+(VideoBoard bundle) and the next version must apply cuts, lay slides on V2, mark
+intros/outros/name plates, move a section, and be split into separate episodes.
+
+**REQUIRED READING:** `references/review-to-edit.md`. The short version:
+
+1. **Transcribe locally** — `scripts/mixdown.mjs` + `scripts/transcribe_local.py`
+   (GPU, word times). Never pass `--hotwords` on a long recording.
+2. **Treat the notes' times as intent only.** Snap every edge into a measured pause
+   (`scripts/scan.mjs`, threshold from the level histogram) and **hear it** with
+   `scripts/splicecheck.py` before cutting.
+3. **Build in a clone with `scripts/rearrange.mjs`** (absolute targets, not ripple
+   edits), verify expected-vs-actual, then `scripts/placestills.mjs` for slides.
+4. **Hear every join again** on a mixdown of the finished sequence, then look at
+   exported frames.
+5. **Split into episodes** by cloning the verified edit and cutting each down.
+
 ## Hard-won constraints
 
 **A bridge timeout is not a failure.** `applyTimecodeEdits` gives up at 120 s and
@@ -248,6 +267,32 @@ measured against the waveform.
 name silently reports "never transcribed" for a sequence whose full transcript is
 sitting in the file, and the natural next move — re-running transcription — costs an
 hour. Look up `snapshot.sequenceId` first, and keep the name lookup only as a fallback.
+
+**`TrackItem.move()` does not drag the linked partner.** On this build it moves only the
+item it is called on; audio stays behind. Move every item explicitly (`rearrange.mjs`
+does) and test on the live sequence first (`--step test-move`).
+
+**Ripple deletes desync tracks that are empty under the range.** The host removes the
+pieces under a range track by track; a track with nothing there is not shifted, so later
+V2 content (a screen recording, slides) drifts. Rebuild with absolute targets instead.
+
+**Assigning `end` does not trim a video/audio clip.** It lengthens the timeline item and
+leaves `outPoint` where it was. Set `outPoint` (a whole `Time` object), then `end`, and
+read both back. `clip.start.seconds = x` is a silent no-op; assign whole `Time` objects.
+
+**`sequence.end` can report the top video track's end, not the sequence's.** With slides
+on V2 it returned the last slide's end. Compute the last clip end over all tracks.
+
+**JSX source must not contain backslashes.** They are mangled on the way into the host:
+a Windows path literal breaks the parse ("EvalScript error"). Use forward slashes, or
+`new File('C:/…').fsName` where a native path is required (`exportFramePNG`).
+
+**QE `exportFramePNG` is unreliable past one hour** — it returns a frame from the head
+of the sequence. Check late material in shorter sequences.
+
+**A level check does not prove a word is intact.** Where two microphones overlap the
+floor rises to −60 dB and a consonant inside a word reads as a pause. Hear every join
+(`scripts/splicecheck.py`).
 
 ## Payload shapes
 These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT_PRM_`, v2.16.1).
