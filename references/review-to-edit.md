@@ -91,13 +91,17 @@ more precise than the long-file pass) and pin the blades that are still wrong.
 
 ## 5. Rebuild with absolute targets — `scripts/rearrange.mjs`
 
-> **If the new order differs from the old one, use `scripts/assemble.mjs`, not this.**
-> On Premiere 26.3 `move()` leaves the track's item list in its original order: a
-> canvas built by park-and-place passed every DOM check while the timeline showed it
-> empty and the renderer dropped the video of whole pieces (seen only on an exported
-> frame; `sequence.end` pointed at the formerly-last clip). Inserting the pieces in
-> ascending time into an emptied clone of the source sequence builds a clean track.
-> Check a rendered frame inside a piece that came from late in the source.
+> **If the new order differs from the old one, clone the result afterwards, or use
+> `scripts/assemble.mjs`.** On Premiere 26.3 `move()` leaves the track's item list in
+> its original order: a canvas built by park-and-place passed every DOM check while the
+> timeline showed it empty and the renderer dropped the video of whole pieces
+> (`sequence.end` pointed at the formerly-last clip). On a lecture with one section
+> moved, the same state rendered perfect frames — only the panel (V1/A1 empty after the
+> moved demo) and `sequence.end` gave it away, and the user saw it before any check did
+> («после 41 минуты только слайды»). `scripts/trackorder.mjs` finds it;
+> `sequence.clone()` repairs it and keeps every clip's effects. `assemble.mjs` builds
+> fresh clips from the project items, so it drops the source clips' effects (there: a
+> five-effect audio chain on every A1 clip).
 
 Ripple deletes and insert edits are the wrong tool when a second video track has
 content downstream: the host's ripple delete removes the pieces under the range
@@ -134,8 +138,9 @@ razors every track, lifts, and moves every piece to an absolute target:
 - Snap switch points to a pause after a sentence end. Put the switch exactly on a
   cut where one exists: the slide change hides the jump cut underneath.
 - Full-frame slides hide the speaker by design when the notes say "split screen"
-  and the instruction is "just put the slide on V2" — say so in the report, or
-  the user reads "only slides, no video" as a broken timeline.
+  and the instruction is "just put the slide on V2" — say so in the report. But
+  look at the timeline before explaining "only slides, no video" away with it: the
+  one time a user said that, V1/A1 really were drawn empty (section 5).
 
 ## 7. Markers
 
@@ -143,12 +148,23 @@ razors every track, lifts, and moves every piece to an absolute target:
   one frame apart.
 - The host cannot create span markers on this build: a plate's duration goes into
   the comment.
+- The host lands every marker green whatever `color` says: colour them with
+  `scripts/markercolors.mjs` (or by name in JSX) and read the colours back.
+- Moving markers in JSX: seconds, not `Time`; assigning `start` moves the whole marker.
 
 ## 8. Split into episodes
 
 Clone the verified full edit once per episode, then `rearrange.mjs` with `lift`
 outside the episode and `map: [{a, b, ns: 0}]`; set that sequence's in/out and
 recreate its markers (a clone carries all of them at the old times).
+
+**An episode edge is a join too — hear it.** Ролик 1 was set to end where slide 8
+switched, and that switch fell into the 0.2 s gap between «это» and «DR.»: the
+episode ended on «…это» and the next one opened with «DR.». Both edges sat in
+silence, so no level check could catch it. Transcribe a few seconds on each side of
+every edge on its own (which words are present is reliable even when their stamps
+are half a second off) and put the edge in the pause after the sentence's last word.
+Then compare every episode with its range of the full edit, item for item.
 
 ## 9. Look at the result
 
@@ -160,9 +176,14 @@ recreate its markers (a clone carries all of them at the old times).
   per-episode sequences, which are all shorter than an hour.
 - The first export after a big rearrange may render a BRAW layer black; export via
   the playhead (`setPlayerPosition`, then `qe…CTI.timecode`) and compare.
-- `sequence.end` reported the end of the **topmost occupied video track** (the last
-  slide), not of the sequence. Compute the last clip end over all tracks before
-  setting an out point.
+- A frame taken after a ripple must be pixel-identical to the frame from before it at
+  the old time — compare decoded pixels (`ffmpeg -f rawvideo … | md5sum`): the PNG
+  bytes differ even when the image does not.
+- Look at the timeline panel as well: `scripts/prwindow.ps1` captures the Premiere window.
+- `sequence.end` short of the last clip's end is the broken-track symptom of section 5,
+  not a quirk of slides on V2 (that is what it looked like at first) — run
+  `scripts/trackorder.mjs`. Compute the last clip end over all tracks before setting
+  an out point.
 
 ## Appendix: finding retakes in the raw take, before any draft exists
 

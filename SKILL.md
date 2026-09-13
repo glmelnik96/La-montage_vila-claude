@@ -218,13 +218,18 @@ intros/outros/name plates, move a section, and be split into separate episodes.
 2. **Treat the notes' times as intent only.** Snap every edge into a measured pause
    (`scripts/scan.mjs`, threshold from the level histogram) and **hear it** with
    `scripts/splicecheck.py` before cutting.
-3. **Build with `scripts/assemble.mjs`** whenever the new order differs from the old:
-   clone the source, empty the clone, insert every piece in ascending time.
-   `scripts/rearrange.mjs` (absolute moves) only for edits that keep the clips' order.
-   Verify expected-vs-actual AND a rendered frame inside a piece that came from late
-   in the source, then `scripts/placestills.mjs` for slides.
-4. **Hear every join again** on a mixdown of the finished sequence, then look at
-   exported frames.
+3. **Build so that every track's item list ends up in time order.** A new order:
+   `scripts/rearrange.mjs`, then `sequence.clone()` of the result (keeps clip effects),
+   or `scripts/assemble.mjs` when the source clips carry no effects. Then
+   `scripts/trackorder.mjs`, expected-vs-actual, a rendered frame from late in the
+   source, and `scripts/placestills.mjs` for slides. One range out later:
+   `scripts/ripplecut.mjs`.
+4. **Hear every join again** on a mixdown of the finished sequence — and every episode
+   edge. An episode that ended on a slide switch stopped between «это» and «DR.»: a
+   short word's timestamp drifts by half a second either way, so transcribe the audio
+   on each side of the edge (which words are present is reliable when their times are
+   not) and measure the level on the kept side of every edge. Then look at exported
+   frames and at the timeline panel itself (`scripts/prwindow.ps1`).
 5. **Split into episodes** by cloning the verified edit and cutting each down.
 
 ## Hard-won constraints
@@ -295,11 +300,19 @@ does) and test on the live sequence first (`--step test-move`).
 positions, in-points, audio partners — yet the timeline panel drew the canvas empty,
 the renderer returned frames with no video for whole stretches, and `sequence.end`
 reported the new end of the clip that used to be LAST. The track keeps its items in
-the original order and `move()` does not re-sort it. Only a rendered frame shows this.
-Build reordered edits with `scripts/assemble.mjs` instead: clone the source sequence,
-empty the clone, and `overwriteClip` each piece at its target in ascending time (the
-project item's in/out set just for that overwrite; the linked audio lands on A1 by
-itself). Keep `rearrange.mjs` for moves that never change the clips' order.
+the original order and `move()` does not re-sort it. The renderer is not always hit: on
+a one-hour lecture with one section moved, QE frames were perfect and only the panel
+(V1/A1 drawn empty after the moved section) and `sequence.end` were wrong. So check the
+order itself — `node scripts/trackorder.mjs` flags every sequence whose `track.clips`
+run out of time order or whose `sequence.end` is not its last clip's end.
+**Repair with `sequence.clone()`:** a clone rebuilds every track's list in time order and
+keeps each clip's effects. Compare the clone with the original, then rename the broken one
+`_OLD_…` and the clone to the real name. To build a reordered edit, run `rearrange.mjs`
+and clone the result, or use `scripts/assemble.mjs` (clone the source, empty it,
+`overwriteClip` each piece at its target in ascending time). **`assemble.mjs` places
+fresh clips from the project item, so effects on the source's clips — an audio chain, a
+grade — do not come along;** list the clips' `components` before choosing it. Moves that
+never change the clips' order (a ripple: `scripts/ripplecut.mjs`) are safe.
 
 **Assembling on V2 and from phone footage (`assemble.mjs` rows with `tr`/`sc`).**
 `videoTracks[1].overwriteClip` puts the clip's audio on A2 by itself — the interview on A1
@@ -312,14 +325,20 @@ end to end (a 3 s clip in a 5 s slot is followed by the next clip): gaps flash t
 
 **Ripple deletes desync tracks that are empty under the range.** The host removes the
 pieces under a range track by track; a track with nothing there is not shifted, so later
-V2 content (a screen recording, slides) drifts. Rebuild with absolute targets instead.
+V2 content (a screen recording, slides) drifts. Rebuild with absolute targets instead, or
+remove one range with `node scripts/ripplecut.mjs --seq "<name>" --cut a,b`: it razors
+clips across the edges (a slide over the cut is trimmed, not split), removes what lies
+inside, shifts everything after b in ascending order, and moves markers and the out point.
 
 **Assigning `end` does not trim a video/audio clip.** It lengthens the timeline item and
 leaves `outPoint` where it was. Set `outPoint` (a whole `Time` object), then `end`, and
 read both back. `clip.start.seconds = x` is a silent no-op; assign whole `Time` objects.
 
-**`sequence.end` can report the top video track's end, not the sequence's.** With slides
-on V2 it returned the last slide's end. Compute the last clip end over all tracks.
+**`sequence.end` short of the last clip's end means a broken track, not a quirk.** It is
+the end of the item that is last in a track's LIST (see `move()` above). The sequence that
+once seemed to "return the last slide's end" had a V1 reordered by `move()`; its clone
+reported the right end. Compute the last clip end over all tracks, and when the two
+differ, run `scripts/trackorder.mjs`.
 
 **JSX source must not contain backslashes.** They are mangled on the way into the host:
 a Windows path literal breaks the parse ("EvalScript error"). Use forward slashes, or
@@ -344,6 +363,9 @@ These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT
   `timeSec` (NOT `startSec`); rows without a numeric `timeSec` are silently skipped. The host
   ignores `color` (host 2.17.0: all 83 markers of one job landed green) — colour them afterwards
   with `node scripts/markercolors.mjs --file <markers.json> --seq "<name>"`, which reads each back.
+  Moving a marker from JSX: `marker.start` / `marker.end` take plain seconds (a `Time` object is
+  an "Illegal Parameter type"), and assigning `start` moves the whole marker, length and all —
+  set `start` first, then `end`, or a zero-length marker comes out stretched.
 - `reframe` plan: `{ "newName":"Reel …", "targetW":1080, "targetH":1920, "expectedSequenceName":"<src seq>",
   "items": [ { "trackIndex":N, "clipIndex":N, "scalePct":N, "posX":0.5, "posY":0.5 }, ... ] }`. It
   CLONES the whole active sequence into a vertical one and applies Motion Scale/Position per clip.
