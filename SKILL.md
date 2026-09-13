@@ -301,6 +301,15 @@ empty the clone, and `overwriteClip` each piece at its target in ascending time 
 project item's in/out set just for that overwrite; the linked audio lands on A1 by
 itself). Keep `rearrange.mjs` for moves that never change the clips' order.
 
+**Assembling on V2 and from phone footage (`assemble.mjs` rows with `tr`/`sc`).**
+`videoTracks[1].overwriteClip` puts the clip's audio on A2 by itself — the interview on A1
+is untouched; mute A2 (`audioTracks[1].setMute(1)`) for a draft B-roll layer. There is no
+`TrackItem.setScaleToFrameSize()` on 26.3: scale 720p footage via the Motion component
+(`matchName 'AE.ADBE Motion'`, `properties[1]` = Scale, 150 for 1280×720 on 1080p). A 30 fps
+source reports its in-point on its own 1/30 s grid — compare in-points with 0.05 s, or a
+placed piece never counts as done and gets overwritten on every pass. Fill a B-roll region
+end to end (a 3 s clip in a 5 s slot is followed by the next clip): gaps flash the face.
+
 **Ripple deletes desync tracks that are empty under the range.** The host removes the
 pieces under a range track by track; a track with nothing there is not shifted, so later
 V2 content (a screen recording, slides) drifts. Rebuild with absolute targets instead.

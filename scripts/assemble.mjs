@@ -26,8 +26,11 @@ const SRC = arg('src'), SEQ = arg('seq'), STEP = arg('step'), B = +arg('batch', 
 const only = arg('only') ? new Set(arg('only').split(',')) : null;
 let plan = arg('plan') ? JSON.parse(readFileSync(arg('plan'), 'utf8')) : [];
 if (only) plan = plan.filter((r) => only.has(r.label));
-plan = plan.map((r) => ({ c: r.clip, ns: r.ns, ne: r.ne, i: r.sIn, o: +(r.sIn + (r.ne - r.ns)).toFixed(3), l: r.label }))
-  .sort((a, b) => a.ns - b.ns);
+// t = video track index (0 = V1; its audio lands on the same-index audio track by itself),
+// sc = scale the placed video to the frame (720p vlog footage on a 1080p sequence)
+plan = plan.map((r) => ({ c: r.clip, ns: r.ns, ne: r.ne, i: r.sIn, o: +(r.sIn + (r.ne - r.ns)).toFixed(3), l: r.label,
+  t: r.tr || 0, sc: +r.sc || 0 }))            // sc is the Scale percentage itself (150), not a flag
+  .sort((a, b) => a.t - b.t || a.ns - b.ns);
 
 const isTimeout = (e) => /timeout|timed out|не ответил/i.test(String(e));
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -73,14 +76,17 @@ const BODY = {
     return JSON.stringify({done:n,remaining:rem});`,
   place: `
     var P=${JSON.stringify(plan)}, s=p.activeSequence; if(String(s.name)!==${JSON.stringify(SEQ)}) return JSON.stringify({error:'active is '+s.name});
-    var V=s.videoTracks[0], A=s.audioTracks[0], SV=S.videoTracks[0], n=0, k, j, note=[];
+    var SV=S.videoTracks[0], n=0, k, j, note=[], V, A;
     function at(tr,t0){for(var q=0;q<tr.clips.numItems;q++){if(Math.abs(tr.clips[q].start.seconds-t0)<0.02) return tr.clips[q];}return null;}
     function tm(x){var t=new Time();t.seconds=x;return t;}
     var rem=0;
-    for(k=0;k<P.length;k++){ var e=P[k], v=at(V,e.ns), src=SV.clips[e.c], pi=src.projectItem;
+    for(k=0;k<P.length;k++){ var e=P[k]; V=s.videoTracks[e.t]; A=s.audioTracks[e.t];
+      var v=at(V,e.ns), src=SV.clips[e.c], pi=src.projectItem;
       // a still reports its default source range 3599.96-3604.96: no in-point to compare, no audio
       var still=Math.abs(src.inPoint.seconds-3600)<0.1;
-      if(v && (still || Math.abs(v.inPoint.seconds-e.i)<0.02) && Math.abs(v.end.seconds-e.ne)<0.02) continue;
+      // a 30 fps source reports its in-point on its own 1/30 s grid: allow a frame and a half,
+      // or a placed vlog piece never counts as done and is overwritten on every pass
+      if(v && String(v.name)===String(src.name) && (still || Math.abs(v.inPoint.seconds-e.i)<0.05) && Math.abs(v.end.seconds-e.ne)<0.05) continue;
       if(n>=${B}){rem++;continue;}
       if(!still){ pi.setInPoint(e.i,4); pi.setOutPoint(e.o,4); }
       V.overwriteClip(pi,e.ns);
@@ -88,6 +94,9 @@ const BODY = {
       v=at(V,e.ns);
       if(!v){ note.push(e.l+' not placed'); n++; continue; }
       if(Math.abs(v.end.seconds-e.ne)>=0.02){ if(!still){ v.outPoint=tm(e.i+(e.ne-e.ns)); } v.end=tm(e.ne); }
+      // no setScaleToFrameSize on this build: set Motion > Scale (properties[1]) to e.sc percent
+      if(e.sc){ try{ var mo=null,q2; for(q2=0;q2<v.components.numItems;q2++){ if(String(v.components[q2].matchName)==='AE.ADBE Motion') mo=v.components[q2]; }
+        if(mo) mo.properties[1].setValue(e.sc,true); else note.push(e.l+' no Motion'); }catch(eS){ note.push(e.l+' scale: '+eS); } }
       var a=at(A,e.ns);
       if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)); a.end=tm(e.ne); }
       if(!still && !a) note.push(e.l+' no audio');
