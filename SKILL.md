@@ -218,8 +218,11 @@ intros/outros/name plates, move a section, and be split into separate episodes.
 2. **Treat the notes' times as intent only.** Snap every edge into a measured pause
    (`scripts/scan.mjs`, threshold from the level histogram) and **hear it** with
    `scripts/splicecheck.py` before cutting.
-3. **Build in a clone with `scripts/rearrange.mjs`** (absolute targets, not ripple
-   edits), verify expected-vs-actual, then `scripts/placestills.mjs` for slides.
+3. **Build with `scripts/assemble.mjs`** whenever the new order differs from the old:
+   clone the source, empty the clone, insert every piece in ascending time.
+   `scripts/rearrange.mjs` (absolute moves) only for edits that keep the clips' order.
+   Verify expected-vs-actual AND a rendered frame inside a piece that came from late
+   in the source, then `scripts/placestills.mjs` for slides.
 4. **Hear every join again** on a mixdown of the finished sequence, then look at
    exported frames.
 5. **Split into episodes** by cloning the verified edit and cutting each down.
@@ -230,7 +233,22 @@ intros/outros/name plates, move a section, and be split into separate episodes.
 `evalJson` at 30 s, but the edit keeps running inside Premiere. Ripple-deleting
 ~1200 clips takes minutes. Re-issuing the call applies the edit TWICE. Correct
 response: catch the timeout, then poll a cheap read until the host answers again,
-and confirm the resulting state before continuing.
+and confirm the resulting state before continuing. The 30 s cap holds whatever
+`timeoutMs` you pass, and the panel reports it in Russian («ExtendScript не ответил
+за 30с») — a `/timeout/` regex alone misses it. Batch every mutating loop so one call
+stays well under 30 s: removing ~200 pieces in one `lift` call did not.
+
+**Subtitles are native captions, never rendered cards.** The user wants them editable in
+Premiere. Import an SRT and `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE)`
+(returns true; `seq.captionTracks` is not exposed to scripts, but QE-exported frames do show
+the captions — check there). Font and plate have no scripting API: leave them to Track Style.
+`scripts/subcues.mjs` builds the SRT from corrected text timed on ASR words.
+
+**Mixed-language interviews: transcribe with `scripts/transcribe_mixed.py`.** When the
+subject answers in one language and the crew talks in another between takes, a
+single-language pass forced to English translates the crew's Russian into fluent
+English that reads like the subject's answer. The script picks the language per
+voice chunk and transcribes each run in its own language.
 
 **ExtendScript is ES3.** Anything newer silently is not there:
 - no arrow functions, no `let`/`const`, no template literals, no destructuring;
@@ -272,6 +290,17 @@ hour. Look up `snapshot.sequenceId` first, and keep the name lookup only as a fa
 item it is called on; audio stays behind. Move every item explicitly (`rearrange.mjs`
 does) and test on the live sequence first (`--step test-move`).
 
+**Moving clips past each other with `move()` breaks the track (Premiere 26.3).** After
+`rearrange.mjs` parked 338 pieces and placed them back, every DOM read was perfect —
+positions, in-points, audio partners — yet the timeline panel drew the canvas empty,
+the renderer returned frames with no video for whole stretches, and `sequence.end`
+reported the new end of the clip that used to be LAST. The track keeps its items in
+the original order and `move()` does not re-sort it. Only a rendered frame shows this.
+Build reordered edits with `scripts/assemble.mjs` instead: clone the source sequence,
+empty the clone, and `overwriteClip` each piece at its target in ascending time (the
+project item's in/out set just for that overwrite; the linked audio lands on A1 by
+itself). Keep `rearrange.mjs` for moves that never change the clips' order.
+
 **Ripple deletes desync tracks that are empty under the range.** The host removes the
 pieces under a range track by track; a track with nothing there is not shifted, so later
 V2 content (a screen recording, slides) drifts. Rebuild with absolute targets instead.
@@ -303,7 +332,9 @@ These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT
   so earlier ripple deletes don't shift the coordinates of later ones. Give ORIGINAL-timeline
   coordinates for every interval; do not pre-compensate for shifts.
 - `markers`: `[ { "timeSec":N, "name":"...", "comment":"...", "color":1 }, ... ]` — the host key is
-  `timeSec` (NOT `startSec`); rows without a numeric `timeSec` are silently skipped.
+  `timeSec` (NOT `startSec`); rows without a numeric `timeSec` are silently skipped. The host
+  ignores `color` (host 2.17.0: all 83 markers of one job landed green) — colour them afterwards
+  with `node scripts/markercolors.mjs --file <markers.json> --seq "<name>"`, which reads each back.
 - `reframe` plan: `{ "newName":"Reel …", "targetW":1080, "targetH":1920, "expectedSequenceName":"<src seq>",
   "items": [ { "trackIndex":N, "clipIndex":N, "scalePct":N, "posX":0.5, "posY":0.5 }, ... ] }`. It
   CLONES the whole active sequence into a vertical one and applies Motion Scale/Position per clip.

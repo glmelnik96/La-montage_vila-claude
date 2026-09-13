@@ -71,7 +71,33 @@ node scripts/scan.mjs --src mix.wav --thresh -50 --min 0.12 --json sil.json
 
 Keep ≥ 0.08 s between a blade and the nearest speech on both sides.
 
+**Hear each piece alone before trusting a mixdown.** When an edit has empty windows
+between scenes (room for B-roll), a transcript of the whole mixdown drags words
+across the digital silence: the next piece's first word lands at the previous
+piece's end and looks like a leak, and the piece itself looks clipped. On one
+28-piece canvas that produced nine false alarms. Transcribing each piece's source
+range on its own (padded with 0.4 s of silence) separated the five real problems
+from the noise.
+
+**Where the blade goes, when whisper's stamps are off.** Word starts after a pause
+are stamped early, ends are stamped late, and the first-pass transcript can shift a
+whole phrase: a countdown «three, two, one» at a file's head came out as «I came», and
+an «okay» sat 0.7 s late on top of the «if» that followed it. Choose the pause from
+the envelope: the quiet stretch next to the word, scored by its room minus its
+distance from the stamped boundary and never searched further than 0.8 s away —
+a wider window finds breaths and laughter seconds off. Then hear every edge in a
+3-second window with word times (a fresh transcription of just that window is far
+more precise than the long-file pass) and pin the blades that are still wrong.
+
 ## 5. Rebuild with absolute targets — `scripts/rearrange.mjs`
+
+> **If the new order differs from the old one, use `scripts/assemble.mjs`, not this.**
+> On Premiere 26.3 `move()` leaves the track's item list in its original order: a
+> canvas built by park-and-place passed every DOM check while the timeline showed it
+> empty and the renderer dropped the video of whole pieces (seen only on an exported
+> frame; `sequence.end` pointed at the formerly-last clip). Inserting the pieces in
+> ascending time into an emptied clone of the source sequence builds a clean track.
+> Check a rendered frame inside a piece that came from late in the source.
 
 Ripple deletes and insert edits are the wrong tool when a second video track has
 content downstream: the host's ripple delete removes the pieces under the range
@@ -83,7 +109,9 @@ razors every track, lifts, and moves every piece to an absolute target:
   in `[a, b)` goes to `ns + start − a`). A 3 s gap is an offset in `ns`; moving a
   section is the order of the map.
 - Two passes (park past the end, then place) so no move collides; every step is
-  idempotent, so a bridge timeout is answered by re-running it.
+  idempotent, so a bridge timeout is answered by re-running it. `lift` is batched
+  too: removing ~200 pieces in one call ran past the bridge's 30 s cap (the removal
+  still finished inside Premiere — confirm with a clip count before re-running).
 - `--step test-move` first. **`TrackItem.move(Time)` does NOT drag the linked
   partner on this build** (the panel's own comment claims it does); every audio
   piece is moved explicitly.

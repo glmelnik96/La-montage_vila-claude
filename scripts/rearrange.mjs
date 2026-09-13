@@ -1,6 +1,11 @@
 // Rearrange the active sequence in place: razor, lift, and move every clip to an
 // absolute new position.
 //
+// WARNING (Premiere 26.3): moving clips PAST EACH OTHER with move() leaves the track's
+// internal item list in the old order — the DOM reports every clip correctly while the
+// timeline panel draws it empty and the renderer drops its video. When the new order
+// differs from the old, build with assemble.mjs (insert in time order) instead.
+//
 // Why not ripple deletes and insert edits: the host's ripple delete removes the
 // pieces under the range track by track, so a track with NOTHING under the range
 // is not shifted. Cut 10 s out of V1 while V2 is empty there, and every later
@@ -85,16 +90,17 @@ const BODY = {
     var o=clips(),bad=[];
     for(k=0;k<T.length;k++) for(i=0;i<o.length;i++) if(o[i].st<T[k]-EPS&&o[i].en>T[k]+EPS) bad.push(o[i].k+o[i].tr+'@'+T[k]);
     return JSON.stringify({razored:n,fails:f,stillSpanning:bad});`,
+  // Batched like park/place: one call removing ~200 pieces outran the bridge's 30 s cap.
   lift: `
     var o=clips(),ids=[],i,r;
     for(i=0;i<o.length;i++) for(r=0;r<P.lift.length;r++)
       if(o[i].st>=P.lift[r][0]-EPS&&o[i].en<=P.lift[r][1]+EPS){ids.push(o[i].id);break;}
-    var n=0,gone=0;
-    for(i=0;i<ids.length;i++){var x=byId(ids[i]);if(!x){gone++;continue;}x.c.remove(0,1);n++;}
+    var n=0;
+    for(i=0;i<ids.length&&n<B;i++){var x=byId(ids[i]);if(!x)continue;x.c.remove(0,1);n++;}
     o=clips(); var left=[];
     for(i=0;i<o.length;i++) for(r=0;r<P.lift.length;r++)
       if(o[i].st<P.lift[r][1]-EPS&&o[i].en>P.lift[r][0]+EPS) left.push(o[i].k+o[i].tr+'@'+Math.round(o[i].st*100)/100);
-    return JSON.stringify({removed:n,alreadyGone:gone,stillInside:left});`,
+    return JSON.stringify({moved:n,remaining:left.length,stillInside:left.slice(0,20)});`,
   park: `
     var o=clips(),v=[],a=[],i,n=0;
     for(i=0;i<o.length;i++) if(o[i].st<P.park-1){ if(o[i].k==='v') v.push(o[i]); else a.push(o[i]); }
@@ -142,16 +148,21 @@ async function run(body, extra) {
 
 // A bridge timeout does not stop the edit inside Premiere. The steps are
 // idempotent, so the answer to a timeout is: wait, then run the step again.
+// The panel's bridge reports it in Russian («ExtendScript не ответил за 30с»).
+const isTimeout = (e) => /timeout|timed out|не ответил/i.test(String(e));
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function loop(name) {
-  for (let pass = 1; pass <= 60; pass++) {
+  for (let pass = 1; pass <= 120; pass++) {
     let r;
     try { r = await run(BODY[name], `var B=${BATCH};`); }
     catch (e) {
-      if (/timeout|timed out/i.test(String(e))) { console.error(`  ${name}: bridge timeout, re-checking`); await new Promise(r => setTimeout(r, 5000)); continue; }
+      if (isTimeout(e)) { console.error(`  ${name}: bridge timeout, re-checking`); await pause(8000); continue; }
       throw e;
     }
     console.error(`  ${name} pass ${pass}: moved ${r.moved}, remaining ${r.remaining}`);
     if (r.remaining === 0) return;
+    if (r.moved === 0) throw new Error(`${name} stalled: ${JSON.stringify(r.stillInside || r)}`);
   }
   throw new Error(`${name}: did not converge`);
 }
@@ -162,17 +173,17 @@ async function main() {
     if (st === 'razor') {
       const T = [...new Set(plan.razor)].sort((a, b) => a - b);
       for (let i = 0; i < T.length; i += 8) {
-        const r = await run(BODY.razor, `var T=${JSON.stringify(T.slice(i, i + 8))};`);
+        let r;
+        // razoring an existing cut again is a no-op, so a timed-out batch is simply repeated
+        for (;;) {
+          try { r = await run(BODY.razor, `var T=${JSON.stringify(T.slice(i, i + 8))};`); break; }
+          catch (e) { if (!isTimeout(e)) throw e; console.error('  razor: bridge timeout, re-checking'); await pause(8000); }
+        }
         console.error(`  razor ${i + 1}-${Math.min(i + 8, T.length)}/${T.length}: ${r.razored} cuts, ${r.fails} fails` +
           (r.stillSpanning.length ? `, STILL SPANNING ${r.stillSpanning.join(' ')}` : ''));
         if (r.stillSpanning.length) throw new Error('razor left clips spanning a cut point');
       }
-    } else if (st === 'lift') {
-      const r = await run(BODY.lift);
-      console.error(`  lift: removed ${r.removed} (${r.alreadyGone} went with their linked partner)` +
-        (r.stillInside.length ? `, STILL INSIDE ${r.stillInside.join(' ')}` : ''));
-      if (r.stillInside.length) throw new Error('lift left material inside a removed range');
-    } else if (st === 'park' || st === 'place') {
+    } else if (st === 'lift' || st === 'park' || st === 'place') {
       await loop(st);
     } else if (st === 'test-move') {
       console.log(JSON.stringify(await run(BODY['test-move'])));
