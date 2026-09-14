@@ -249,6 +249,15 @@ Premiere. Import an SRT and `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FO
 the captions — check there). Font and plate have no scripting API: leave them to Track Style.
 `scripts/subcues.mjs` builds the SRT from corrected text timed on ASR words.
 
+**Read the finished canvas for repeats before handing it over.** Interview answers overlap:
+the same thought comes back in another take or under another question. Print every piece's
+words in canvas order, read them, and list the 4-word phrases two pieces share. On one film
+this found two closing lines from two takes back to back (the user called it a double
+ending), the self-introduction again as a vlog greeting, two answers on adaptation in a row,
+a trip told in the travel scene and again as a memory, a lead-in that re-asked the previous
+answer's question, and a vlog insert whose last sentence repeated its second. Keep one of
+each; the rest goes to the alternate takes, where nothing is lost.
+
 **Mixed-language interviews: transcribe with `scripts/transcribe_mixed.py`.** When the
 subject answers in one language and the crew talks in another between takes, a
 single-language pass forced to English translates the crew's Russian into fluent
@@ -316,12 +325,17 @@ never change the clips' order (a ripple: `scripts/ripplecut.mjs`) are safe.
 
 **Assembling on V2 and from phone footage (`assemble.mjs` rows with `tr`/`sc`).**
 `videoTracks[1].overwriteClip` puts the clip's audio on A2 by itself — the interview on A1
-is untouched; mute A2 (`audioTracks[1].setMute(1)`) for a draft B-roll layer. There is no
-`TrackItem.setScaleToFrameSize()` on 26.3: scale 720p footage via the Motion component
-(`matchName 'AE.ADBE Motion'`, `properties[1]` = Scale, 150 for 1280×720 on 1080p). A 30 fps
-source reports its in-point on its own 1/30 s grid — compare in-points with 0.05 s, or a
-placed piece never counts as done and gets overwritten on every pass. Fill a B-roll region
-end to end (a 3 s clip in a 5 s slot is followed by the next clip): gaps flash the face.
+is untouched; mute A2 (`audioTracks[1].setMute(1)`) for a draft B-roll layer. `overwriteClip`
+places a fresh clip at Motion defaults, so `assemble.mjs` copies the source clip's framing
+(Motion Position, Scale, Rotation, Anchor) onto it — photos and phone footage scaled to the
+frame on the source sequence otherwise land cropped or small. There is no
+`TrackItem.setScaleToFrameSize()` on 26.3; `sc` sets Motion > Scale (`properties[1]`, 150 for
+1280×720 on 1080p) explicitly. A 30 fps source reports its in-point on its own 1/30 s grid —
+compare in-points with 0.05 s, or a placed piece never counts as done and gets overwritten on
+every pass. A draft B-roll layer uses every clip once, a vlog once per moment and never under
+one of its own inserts: a pool that loops brings the same shot back minutes later, and the
+viewer sees it. Run the shots end to end (a gap flashes the face); when a list runs out, let
+the face show.
 
 **Ripple deletes desync tracks that are empty under the range.** The host removes the
 pieces under a range track by track; a track with nothing there is not shifted, so later
@@ -349,7 +363,9 @@ of the sequence. Check late material in shorter sequences.
 
 **A level check does not prove a word is intact.** Where two microphones overlap the
 floor rises to −60 dB and a consonant inside a word reads as a pause. Hear every join
-(`scripts/splicecheck.py`).
+(`scripts/splicecheck.py`). A dip inside a word also looks like the pause after it: «music»
+had 0.1 s at −55 dB between «mu» and «sic», and a blade pinned there made whisper hear
+«movies». After pinning a blade, transcribe the piece's last seconds on their own.
 
 ## Payload shapes
 These are the `pr.mjs` CLI contracts (verified against the live panel host `_EXT_PRM_`, v2.16.1).

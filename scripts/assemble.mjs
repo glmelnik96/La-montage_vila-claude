@@ -79,6 +79,7 @@ const BODY = {
     var SV=S.videoTracks[0], n=0, k, j, note=[], V, A;
     function at(tr,t0){for(var q=0;q<tr.clips.numItems;q++){if(Math.abs(tr.clips[q].start.seconds-t0)<0.02) return tr.clips[q];}return null;}
     function tm(x){var t=new Time();t.seconds=x;return t;}
+    function mot(c){for(var q=0;q<c.components.numItems;q++){if(String(c.components[q].matchName)==='AE.ADBE Motion') return c.components[q];}return null;}
     var rem=0;
     for(k=0;k<P.length;k++){ var e=P[k]; V=s.videoTracks[e.t]; A=s.audioTracks[e.t];
       var v=at(V,e.ns), src=SV.clips[e.c], pi=src.projectItem;
@@ -94,9 +95,14 @@ const BODY = {
       v=at(V,e.ns);
       if(!v){ note.push(e.l+' not placed'); n++; continue; }
       if(Math.abs(v.end.seconds-e.ne)>=0.02){ if(!still){ v.outPoint=tm(e.i+(e.ne-e.ns)); } v.end=tm(e.ne); }
-      // no setScaleToFrameSize on this build: set Motion > Scale (properties[1]) to e.sc percent
-      if(e.sc){ try{ var mo=null,q2; for(q2=0;q2<v.components.numItems;q2++){ if(String(v.components[q2].matchName)==='AE.ADBE Motion') mo=v.components[q2]; }
-        if(mo) mo.properties[1].setValue(e.sc,true); else note.push(e.l+' no Motion'); }catch(eS){ note.push(e.l+' scale: '+eS); } }
+      // overwriteClip places a fresh clip at Motion defaults: carry the source clip's framing over
+      // (Position, Scale, Scale Width, Uniform Scale, Rotation, Anchor Point) — photos and phone
+      // footage are scaled to the frame on the source sequence and would land cropped or small
+      var ms=mot(src), mv=mot(v), q3;
+      if(ms&&mv){ for(q3=0;q3<6;q3++){ try{ var sv=ms.properties[q3].getValue();
+          if(String(sv)!==String(mv.properties[q3].getValue())) mv.properties[q3].setValue(sv,true); }catch(eM){ note.push(e.l+' motion '+q3+': '+eM); } } }
+      // no setScaleToFrameSize on this build: an explicit sc sets Motion > Scale (properties[1]) to e.sc percent
+      if(e.sc){ try{ if(mv) mv.properties[1].setValue(e.sc,true); else note.push(e.l+' no Motion'); }catch(eS){ note.push(e.l+' scale: '+eS); } }
       var a=at(A,e.ns);
       if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)); a.end=tm(e.ne); }
       if(!still && !a) note.push(e.l+' no audio');
