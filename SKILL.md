@@ -249,6 +249,34 @@ Premiere. Import an SRT and `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FO
 the captions — check there). Font and plate have no scripting API: leave them to Track Style.
 `scripts/subcues.mjs` builds the SRT from corrected text timed on ASR words.
 
+**Watch the cut before you build it.** A plan that verifies against itself still has to
+work as a film. `python scripts/planpreview.py --layout layout.json --plan expected.json
+[--cards cards.json --srt subs.srt] --out preview.mp4` renders the plan itself — V1, the
+B-roll layer above it, the graphics, the speaking audio, burnt-in subtitles — in minutes and
+without Premiere. Watch it, then spend the half hour on the sequence. It is also what the user
+watches to approve the cut, and it shows where the film goes silent. It is a model of the
+timeline: a still that does not fill the frame is letterboxed there while Premiere shows the
+track underneath, so check anything that matters on a real exported frame.
+
+**A still placed on a busy track eats the clip after it.** `placestills.mjs` overwrites at the
+preference default length (5 s) and only then trims the still back, so whatever sat within
+those 5 s loses its head — silently, and the DOM check you ran BEFORE placing the stills
+still says the edit is perfect. Place the stills, then re-run `assemble.mjs --step place`:
+it notices the damaged clip and puts it back.
+
+**Cloud transcription in the panel TRANSLATES.** «Транскрибировать In–Out» returns fluent
+Russian for English and Hindi speech, with segment times. That is a good way to read the
+finished film's story end to end (and to answer "is it understandable"), and useless for
+deciding where a blade goes — for that, transcribe the piece's own audio with
+`large-v3` (`KASHIF_WHISPER=small,cpu` or `large-v3` on CPU when the GPU belongs to
+something else, e.g. ComfyUI holding all the VRAM).
+
+**A filler word can hide inside its neighbour's timestamp.** The user asked to drop an «okay»
+at the head of an answer; the word list had no «okay» — whisper had folded it into the
+following «and» (stamped 1661.56, 0.8 s long). The level profile showed the truth: speech at
+1661.46–1661.74, quiet to 1662.05, the sentence from 1662.06. When a word the user hears is
+not in the transcript, profile the levels at 10 ms and listen to the piece's own head.
+
 **Read the finished canvas for repeats before handing it over.** Interview answers overlap:
 the same thought comes back in another take or under another question. Print every piece's
 words in canvas order, read them, and list the 4-word phrases two pieces share. On one film

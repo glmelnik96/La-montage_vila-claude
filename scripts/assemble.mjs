@@ -29,7 +29,8 @@ if (only) plan = plan.filter((r) => only.has(r.label));
 // t = video track index (0 = V1; its audio lands on the same-index audio track by itself),
 // sc = scale the placed video to the frame (720p vlog footage on a 1080p sequence)
 plan = plan.map((r) => ({ c: r.clip, ns: r.ns, ne: r.ne, i: r.sIn, o: +(r.sIn + (r.ne - r.ns)).toFixed(3), l: r.label,
-  t: r.tr || 0, sc: +r.sc || 0 }))            // sc is the Scale percentage itself (150), not a flag
+  t: r.tr || 0, sc: +r.sc || 0, na: r.na ? 1 : 0 }))   // sc is the Scale percentage itself (150), not a flag;
+                                              // na drops the placed clip's own audio (B-roll filling a window on V1)
   .sort((a, b) => a.t - b.t || a.ns - b.ns);
 
 const isTimeout = (e) => /timeout|timed out|не ответил/i.test(String(e));
@@ -104,8 +105,9 @@ const BODY = {
       // no setScaleToFrameSize on this build: an explicit sc sets Motion > Scale (properties[1]) to e.sc percent
       if(e.sc){ try{ if(mv) mv.properties[1].setValue(e.sc,true); else note.push(e.l+' no Motion'); }catch(eS){ note.push(e.l+' scale: '+eS); } }
       var a=at(A,e.ns);
-      if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)); a.end=tm(e.ne); }
-      if(!still && !a) note.push(e.l+' no audio');
+      if(e.na){ if(a) a.remove(0,0); }          // a window's B-roll is picture only: the film stays quiet there
+      else if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)); a.end=tm(e.ne); }
+      else if(!still && !a) note.push(e.l+' no audio');
       n++; }
     return JSON.stringify({done:n,remaining:rem,note:note.slice(0,10)});`,
   check: `
