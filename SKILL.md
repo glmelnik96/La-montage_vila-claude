@@ -277,7 +277,17 @@ following «and» (stamped 1661.56, 0.8 s long). The level profile showed the tr
 1661.46–1661.74, quiet to 1662.05, the sentence from 1662.06. When a word the user hears is
 not in the transcript, profile the levels at 10 ms and listen to the piece's own head.
 
-**Check the audio CHANNELS before trusting the sound.** A shoot where the lav went into one
+**One-sided sound has TWO causes — check the sequence master first.** A sequence built from
+camera clips with multichannel audio gets a **Multichannel master**, and its audio tracks are
+named «Output 1…4»: each one is wired to a single output channel, so the whole film plays out
+of one speaker no matter what is on the clips. Read it with `sequence.getSettings()` —
+`audioChannelType` 3 with `audioChannelCount` 4 is that case (1/2 is stereo) — and fix it in
+place: take the settings object, set `audioChannelType = 1` and `audioChannelCount = 2`, and
+`sequence.setSettings(...)`. The tracks rename themselves to «Audio 1…4» and route to L/R;
+nothing else in the sequence moves. Every clone of that sequence inherits the master, so fix
+the source too or every new cut starts wrong.
+
+**Check the audio CHANNELS as well.** A shoot where the lav went into one
 input leaves the voice on a single channel: `ffmpeg -i clip -af astats -f null -` prints about
 −65 dB on the silent one against −20 dB on the other. The timeline then plays out of one
 speaker, and nothing in the plan, the DOM or a rendered frame says so — the user hears it.
@@ -289,6 +299,12 @@ reads stale and the same clip collects three copies — drive the batches by an 
 and a mixdown that downmixes to mono (`-ac 1`) averages the silent channel in, hides the
 problem and costs 6 dB — `scripts/mixdown.mjs` takes a `ch` per clip and `planpreview.py`
 detects it.
+
+**Prove the sound, do not reason about it.** `sequence.exportAsMediaDirect(dest, preset, app.encoder.ENCODE_IN_TO_OUT)`
+with an audio preset (`…/MediaIO/systempresets/3F3F3F3F_41494646/AIFF 48kHz.epr`) renders the
+timeline's own audio for a short In/Out range — then `astats` says what each channel really
+carries. The bridge's 30 s cap fires while the export keeps running; wait for the file to stop
+growing. Both channels at the same RMS is the proof that a one-sided source is fixed.
 
 **"Each clip once" does not make B-roll varied.** The eye counts PLACES and SUBJECTS, not clip
 ids. A layer where every clip was used exactly once still read as repetition to the user: four
