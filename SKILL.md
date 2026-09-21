@@ -277,6 +277,17 @@ following «and» (stamped 1661.56, 0.8 s long). The level profile showed the tr
 1661.46–1661.74, quiet to 1662.05, the sentence from 1662.06. When a word the user hears is
 not in the transcript, profile the levels at 10 ms and listen to the piece's own head.
 
+**"Each clip once" does not make B-roll varied.** The eye counts PLACES and SUBJECTS, not clip
+ids. A layer where every clip was used exactly once still read as repetition to the user: four
+shots of the same entrance, three of the same desk, three of the same statue, six from one
+vlog's workshop, five of the same plaza — each a different clip, in a row. Group the material
+by place/subject, lay each stretch so neighbours never come from the same group (at most two
+of a group per stretch), and alternate wide / detail / people. Check it by LOOKING: one frame
+per B-roll shot, in order, labelled with time and clip, tiled into contact sheets — repetition
+is obvious there and invisible in every numeric check. When only the B-roll changes and the
+canvas timing does not, clear that track and re-run `assemble.mjs --step place`: the markers,
+the captions and V1 stay as they are.
+
 **Read the finished canvas for repeats before handing it over.** Interview answers overlap:
 the same thought comes back in another take or under another question. Print every piece's
 words in canvas order, read them, and list the 4-word phrases two pieces share. On one film
