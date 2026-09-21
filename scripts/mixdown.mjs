@@ -6,7 +6,10 @@
 //
 //   node scripts/mixdown.mjs --clips <clips.json> --out <file.wav> [--sr 48000]
 //
-// clips.json: [{ "path": "...", "start": <timeline s>, "in": <source s>, "out": <source s> }, ...]
+// clips.json: [{ "path": "...", "start": <timeline s>, "in": <source s>, "out": <source s>,
+//                "ch": <source channel, optional> }, ...]
+// `ch` takes ONE channel instead of downmixing: on a shoot where the lav went into a single
+// input the other channel is silence, and averaging both throws away 6 dB of the voice.
 import { execFileSync } from 'node:child_process';
 import { readFileSync, existsSync } from 'node:fs';
 
@@ -25,7 +28,8 @@ const chains = [];
 clips.forEach((c, k) => {
   // input-side seek: fast, and exact enough for PCM/AAC at frame precision
   args.push('-ss', c.in.toFixed(3), '-t', (c.out - c.in).toFixed(3), '-i', c.path);
-  chains.push(`[${k}:a:0]aformat=sample_rates=${sr}:channel_layouts=mono,adelay=${Math.round(c.start * 1000)}:all=1[a${k}]`);
+  const mono = c.ch === undefined ? '' : `pan=mono|c0=c${c.ch},`;
+  chains.push(`[${k}:a:0]${mono}aformat=sample_rates=${sr}:channel_layouts=mono,adelay=${Math.round(c.start * 1000)}:all=1[a${k}]`);
 });
 const graph = chains.join(';') + ';' + clips.map((_, k) => `[a${k}]`).join('') +
   `amix=inputs=${clips.length}:duration=longest:normalize=0[out]`;

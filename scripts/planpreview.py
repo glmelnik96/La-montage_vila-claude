@@ -16,7 +16,7 @@
 #   role 'canvas'/'win' -> V1, 'v2' -> the layer above it; every other role is ignored
 #   (the alternate takes and the B-roll library live past the end of the cut).
 # cards rows: {name, st, en, track} — track 0 full-frame on V1, 2 = overlay with alpha.
-import json, os, subprocess, sys, tempfile
+import json, os, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -104,8 +104,34 @@ with open(lst, 'w', encoding='utf-8') as f:
 vid = os.path.join(TMP, 'video.mp4')
 subprocess.run(['ffmpeg', '-v', 'error', '-y', '-f', 'concat', '-safe', '0', '-i', lst, '-c', 'copy', vid], check=True)
 
-clips = [{'path': V[r['clip']]['path'], 'start': r['ns'] - T0, 'in': r['sIn'], 'out': r['sIn'] + (r['ne'] - r['ns'])}
-         for r in sorted(speak, key=lambda x: x['ns']) if T0 - 0.01 <= r['ns'] < END and not is_still(r)]
+def loud_channel(path, at):
+    """Which source channel carries the voice — a lav on one input leaves the other silent, and a
+    plain downmix then loses 6 dB. None when both channels carry sound."""
+    out = subprocess.run(['ffmpeg', '-hide_banner', '-nostats', '-ss', f'{at:.1f}', '-t', '15', '-i', path,
+                          '-af', 'astats=measure_perchannel=RMS_level:measure_overall=none', '-f', 'null', '-'],
+                         capture_output=True, text=True).stderr
+    rms = [float(x) if x != '-inf' else -120.0
+           for x in re.findall(r'RMS level dB:\s*(-?[\d.]+|-inf)', out)]
+    if len(rms) < 2:
+        return None
+    hi = max(range(len(rms)), key=lambda i: rms[i])
+    return hi if rms[hi] - min(rms) > 18 else None
+
+
+CH = {}
+clips = []
+for r in sorted(speak, key=lambda x: x['ns']):
+    if not (T0 - 0.01 <= r['ns'] < END) or is_still(r):
+        continue
+    path = V[r['clip']]['path']
+    if path not in CH:
+        CH[path] = loud_channel(path, r['sIn'] + 1)
+    row = {'path': path, 'start': r['ns'] - T0, 'in': r['sIn'], 'out': r['sIn'] + (r['ne'] - r['ns'])}
+    if CH[path] is not None:
+        row['ch'] = CH[path]
+    clips.append(row)
+one = sum(1 for v in CH.values() if v is not None)
+print(f'audio: {len(CH)} sources, {one} with the voice on one channel only')
 cj, wav = os.path.join(TMP, 'clips.json'), os.path.join(TMP, 'audio.wav')
 json.dump(clips, open(cj, 'w', encoding='utf-8'))
 subprocess.run(['node', 'scripts/mixdown.mjs', '--clips', cj, '--out', wav, '--sr', '48000'], check=True)

@@ -277,6 +277,19 @@ following «and» (stamped 1661.56, 0.8 s long). The level profile showed the tr
 1661.46–1661.74, quiet to 1662.05, the sentence from 1662.06. When a word the user hears is
 not in the transcript, profile the levels at 10 ms and listen to the piece's own head.
 
+**Check the audio CHANNELS before trusting the sound.** A shoot where the lav went into one
+input leaves the voice on a single channel: `ffmpeg -i clip -af astats -f null -` prints about
+−65 dB on the silent one against −20 dB on the other. The timeline then plays out of one
+speaker, and nothing in the plan, the DOM or a rendered frame says so — the user hears it.
+Fix it per clip with the host's own effect, `node scripts/fillmono.mjs --seq "<name>"
+--from right --match .MOV` (QE's `getAudioEffectList()` names them «Fill Left with Right» /
+«Fill Right with Left»; there is no API to REMOVE an effect, so apply it carefully once).
+Two traps: QE serves a cached track item list, so "does this clip already have the effect"
+reads stale and the same clip collects three copies — drive the batches by an index window;
+and a mixdown that downmixes to mono (`-ac 1`) averages the silent channel in, hides the
+problem and costs 6 dB — `scripts/mixdown.mjs` takes a `ch` per clip and `planpreview.py`
+detects it.
+
 **"Each clip once" does not make B-roll varied.** The eye counts PLACES and SUBJECTS, not clip
 ids. A layer where every clip was used exactly once still read as repetition to the user: four
 shots of the same entrance, three of the same desk, three of the same statue, six from one
