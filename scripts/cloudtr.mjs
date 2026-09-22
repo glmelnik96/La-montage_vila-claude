@@ -4,6 +4,12 @@
 //
 //   node scripts/cloudtr.mjs --wav-dir <dir of C###.wav, 16 kHz mono> --out-dir <dir>
 //        [--only C014,C050] [--jobs 6] [--min 3] [--max 15] [--gap 0.35]
+//   node scripts/cloudtr.mjs --wav-dir <dir> --pieces pieces.json --out result.json [--jobs 6]
+//        pieces.json: [{"key", "clip": "C043", "a": 3.28, "b": 36.1, "prompt": "names, terms"}]
+//        -> {key: [{s, e, text}]}: the same phrase groups, but only inside [a, b], sent in order,
+//        each with `prompt` + the tail of the previous phrase as context — a transcript of the
+//        pieces of an edit, for reading. The context fixes names and terms («Семдиби» -> CMDB)
+//        and carries a sentence across a chunk edge.
 //
 // Why: the endpoint (openai/whisper-large-v3 on foundation-models.api.cloud.ru) answers
 // `words: null` even when asked for timestamp_granularities[]=word, and a long file comes back
@@ -19,11 +25,11 @@ import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 
 import { join } from 'node:path';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
-const WAVDIR = arg('wav-dir'), OUT = arg('out-dir'), JOBS = +arg('jobs', 6);
+const WAVDIR = arg('wav-dir'), OUT = arg('out-dir'), JOBS = +arg('jobs', 6), PIECES = arg('pieces');
 const MIN = +arg('min', 3), MAX = +arg('max', 15), GAP = +arg('gap', 0.35);
 const only = arg('only') ? new Set(arg('only').split(',')) : null;
-if (!WAVDIR || !OUT) { console.error('usage: cloudtr.mjs --wav-dir <dir> --out-dir <dir> [--only C014]'); process.exit(2); }
-mkdirSync(OUT, { recursive: true });
+if (!WAVDIR || (!OUT && !PIECES)) { console.error('usage: cloudtr.mjs --wav-dir <dir> --out-dir <dir> [--only C014] | --pieces p.json --out r.json'); process.exit(2); }
+if (OUT) mkdirSync(OUT, { recursive: true });
 
 const cfg = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
 const sec = readFileSync(join(cfg.repos.llmChatPr, 'client/shared/fm-secrets.js'), 'utf8');
@@ -60,21 +66,22 @@ function envelope(pcm, sr) {
   }
   return out;
 }
-// pauses: runs below a threshold set from this clip's own level histogram
-function chunksOf(db) {
+// pauses: runs below a threshold set from this clip's own level histogram; [f0, f1) limits
+// the islands to a range of 10 ms frames (a piece of an edit) while the threshold stays the clip's
+function chunksOf(db, f0 = 0, f1 = db.length) {
   const sorted = Array.from(db).sort((a, b) => a - b);
   const q = (p) => sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))];
   const floor = q(0.05), speech = q(0.7);
   const T = Math.min(floor + 10, speech - 12);
-  const voiced = Array.from(db, (v) => v > T);
+  const voiced = Array.from(db, (v, k) => k >= f0 && k < f1 && v > T);
   // islands of speech separated by >= 0.2 s of quiet
   const isl = [];
-  let i = 0;
-  while (i < voiced.length) {
-    while (i < voiced.length && !voiced[i]) i++;
-    if (i >= voiced.length) break;
+  let i = f0;
+  while (i < f1) {
+    while (i < f1 && !voiced[i]) i++;
+    if (i >= f1) break;
     let j = i, quiet = 0, last = i;
-    while (j < voiced.length && quiet < 20) { if (voiced[j]) { quiet = 0; last = j; } else quiet++; j++; }
+    while (j < f1 && quiet < 20) { if (voiced[j]) { quiet = 0; last = j; } else quiet++; j++; }
     if (last - i >= 8) isl.push([i / 100, (last + 1) / 100]);   // ignore clicks shorter than 80 ms
     i = last + 1;
   }
@@ -102,7 +109,7 @@ function chunksOf(db) {
   }
   return { chunks: out, T: Math.round(T * 10) / 10, floor: Math.round(floor * 10) / 10 };
 }
-async function post(blob, name) {
+async function post(blob, name, prompt) {
   for (let attempt = 1; attempt <= 5; attempt++) {
     const form = new FormData();
     form.append('file', blob, name);
@@ -110,6 +117,7 @@ async function post(blob, name) {
     form.append('language', 'ru');
     form.append('response_format', 'verbose_json');
     form.append('temperature', '0.1');
+    if (prompt) form.append('prompt', prompt);
     try {
       const r = await fetch(URL_TR, { method: 'POST', headers: { Authorization: 'Bearer ' + KEY }, body: form });
       const t = await r.text();
@@ -118,6 +126,70 @@ async function post(blob, name) {
     } catch (e) { if (attempt === 5) throw e; }
     await new Promise((res) => setTimeout(res, 1500 * attempt));
   }
+}
+
+if (PIECES) {
+  // pieces of an edit: chunk inside each piece, transcribe its chunks in order with context
+  const list = JSON.parse(readFileSync(PIECES, 'utf8'));
+  const wavs = {};
+  const load = (clip) => {
+    if (!wavs[clip]) { const w = readWav(join(WAVDIR, clip + '.wav')); wavs[clip] = { ...w, db: envelope(w.pcm, w.sr) }; }
+    return wavs[clip];
+  };
+  const result = {};
+  let nextP = 0, doneP = 0;
+  await Promise.all(Array.from({ length: JOBS }, async () => {
+    while (nextP < list.length) {
+      const p = list[nextP++], w = load(p.clip), dur = w.pcm.length / w.sr;
+      let { chunks } = chunksOf(w.db, Math.floor(p.a * 100), Math.ceil(p.b * 100));
+      if (!chunks.length) chunks = [[p.a, p.b]];
+      const rows = [];
+      let prev = '';
+      // Each phrase group is read twice: with the context (names and terms come out right) and
+      // without it (a prompt can derail a quiet phrase into invented text — «будут в следующем
+      // году» for «останутся фундаментальными»). The reading with the better mean log-probability
+      // wins, the prompted one on a near tie; an implausibly sparse reading (< 6 chars/s) loses.
+      const read = async (a0, b0, ctx) => {
+        const d = await post(wavBlob(w.pcm, w.sr, a0, b0), `${p.key}.wav`, ctx);
+        const segs = d.segments || [];
+        const n = segs.reduce((x, g) => x + Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0);
+        const lp = segs.length ? segs.reduce((x, g) => x + (g.avg_logprob ?? -1) * Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0) / n : -9;
+        let text = String(d.text || '').trim();
+        if (JUNK.test(text) && b0 - a0 < 4) text = '';
+        return { text, lp };
+      };
+      // Whisper copies the style of its prompt: an unpunctuated lower-case phrase used as context
+      // makes the next one come back the same way, and a run of them spreads through an answer
+      // (10 % of the phrases of one job). So the context is the previous phrase only when it is
+      // punctuated, the prompt carries a punctuated style sample, and a punctuated reading beats
+      // an unpunctuated one of similar length.
+      const STYLE = 'Вот как это выглядит: мы работаем с клиентами, помогаем им правильно осваивать технологии. Это важно.';
+      const punct = (t) => (t.match(/[.,!?—:;]/g) || []).length / Math.max(1, t.length) * 100;
+      const bare = (t) => t.length > 60 && punct(t) < 0.9;
+      for (const [a, b] of chunks) {
+        const pa = Math.max(p.a, a - 0.12), pb = Math.min(p.b, dur, b + 0.12);
+        const ctx = [p.prompt || '', STYLE, bare(prev) ? '' : prev.slice(-160)].filter(Boolean).join(' ');
+        const A = await read(pa, pb, ctx), B = await read(pa, pb, '');
+        const ok = (r) => r.text.length / Math.max(0.5, b - a) >= 6 || (b - a < 2 && r.text.length > 0);
+        const similar = A.text.length && B.text.length / A.text.length > 0.7 && B.text.length / A.text.length < 1.4;
+        let pick = A, alt = B;
+        if (ok(A) && ok(B)) {
+          if (bare(A.text) && !bare(B.text) && similar) { pick = B; alt = A; }
+          else if (!(bare(B.text) && !bare(A.text) && similar) && B.lp > A.lp + 0.15) { pick = B; alt = A; }
+        }
+        else if (!ok(A) && ok(B)) { pick = B; alt = A; }
+        else if (!ok(A) && !ok(B) && B.text.length > A.text.length) { pick = B; alt = A; }
+        rows.push({ s: +a.toFixed(2), e: +b.toFixed(2), text: pick.text, lp: +pick.lp.toFixed(3), alt: alt.text,
+          flag: !ok(pick) ? 'sparse' : bare(pick.text) ? 'unpunctuated' : undefined });
+        if (pick.text) prev = pick.text;
+      }
+      result[p.key] = rows;
+      if (++doneP % 10 === 0) console.error(`  ${doneP}/${list.length} pieces`);
+    }
+  }));
+  writeFileSync(arg('out'), JSON.stringify(result, null, 1));
+  console.error(`done: ${Object.keys(result).length} pieces`);
+  process.exit(0);
 }
 
 const files = readdirSync(WAVDIR).filter((f) => /^C\d+\.wav$/.test(f) && (!only || only.has(f.replace('.wav', ''))));

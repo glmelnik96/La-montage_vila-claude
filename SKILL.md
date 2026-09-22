@@ -279,7 +279,16 @@ title card with the question, then the chosen answer, junk and failed takes remo
    list order, marker count. **`importMGT` loses a card now and then (4 of 107)** — re-import
    the missing ones, then re-run `assemble.mjs --step place`: the card's 4.92 s default ate the
    head of the next answer. Look at a frame of every card and every piece.
-8. **Clones inherit the source's In/Out.** Twelve speaker sequences cloned from a RAW with
+8. **Transcripts of the finished pieces** (one document per speaker): `cloudtr.mjs --pieces`
+   with a names-and-terms prompt per speaker — the prompt turns «Семдиби» into CMDB and gets
+   every surname right — but read each phrase twice, with and without the prompt: on a quiet
+   phrase the context invents text («будут в следующем году» for «останутся
+   фундаментальными»). The tool keeps the better reading, prefers a punctuated one, and never
+   uses an unpunctuated phrase as context (that style spreads down a whole answer). A phrase of
+   20 s with no pause can come back empty in both readings — re-read it in 7 s windows. Word
+   files: `docx` (npm) — question as heading, answer in paragraphs broken only where a sentence
+   ends, each with the sequence timecode and the source clip.
+9. **Clones inherit the source's In/Out.** Twelve speaker sequences cloned from a RAW with
    In/Out over four hours would each export four hours of black «In to Out» — set each to
    `[0, end]`.
 
