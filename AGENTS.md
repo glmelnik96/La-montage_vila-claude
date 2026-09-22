@@ -54,6 +54,10 @@ multicam→vertical-reel technique in full.
 | `scripts/vframe.mjs` | 9:16 reframe arithmetic and plan builder |
 | `scripts/checkreframe.mjs` | Invert stored Motion values back to pixels and tile them |
 | `scripts/gen.mjs` | Paid generation — always `--dry-run` and confirm first |
+| `scripts/cloudtr.mjs` | Cloud transcription split at the clip's own pauses (no dropped windows, cuttable edges) |
+| `scripts/cloudsplit.mjs` | Find a cut inside a phrase: the pause after a given word, by cloud-transcribed prefixes |
+| `scripts/cloudedges.mjs` | Read the head and tail of every piece back through the cloud model |
+| `scripts/mogrtcard.py` | Editable title cards: one .mogrt per card from Premiere's Basic Title |
 | `scripts/_ev.mjs` | Evaluate ExtendScript in the Premiere host |
 | `scripts/_pev.mjs` | Evaluate JS in the panel's DOM context |
 

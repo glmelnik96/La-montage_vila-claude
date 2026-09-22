@@ -90,12 +90,14 @@ const BODY = {
       // or a placed vlog piece never counts as done and is overwritten on every pass
       if(v && String(v.name)===String(src.name) && (still || Math.abs(v.inPoint.seconds-e.i)<0.05) && Math.abs(v.end.seconds-e.ne)<0.05) continue;
       if(n>=${B}){rem++;continue;}
-      if(!still){ pi.setInPoint(e.i,4); pi.setOutPoint(e.o,4); }
+      // seconds -> ticks rounds DOWN: 261.08 became 261.04, the piece came out a frame long and
+      // ate the first frame of the clip after it (a whole title card, once). Aim a millisecond in.
+      if(!still){ pi.setInPoint(e.i+0.001,4); pi.setOutPoint(e.o+0.001,4); }
       V.overwriteClip(pi,e.ns);
       if(!still){ try{pi.clearInPoint();pi.clearOutPoint();}catch(e1){ pi.setInPoint(0,4); } }
       v=at(V,e.ns);
       if(!v){ note.push(e.l+' not placed'); n++; continue; }
-      if(Math.abs(v.end.seconds-e.ne)>=0.02){ if(!still){ v.outPoint=tm(e.i+(e.ne-e.ns)); } v.end=tm(e.ne); }
+      if(Math.abs(v.end.seconds-e.ne)>=0.02){ if(!still){ v.outPoint=tm(e.i+(e.ne-e.ns)+0.001); } v.end=tm(e.ne+0.001); }
       // overwriteClip places a fresh clip at Motion defaults: carry the source clip's framing over
       // (Position, Scale, Scale Width, Uniform Scale, Rotation, Anchor Point) — photos and phone
       // footage are scaled to the frame on the source sequence and would land cropped or small
@@ -106,7 +108,7 @@ const BODY = {
       if(e.sc){ try{ if(mv) mv.properties[1].setValue(e.sc,true); else note.push(e.l+' no Motion'); }catch(eS){ note.push(e.l+' scale: '+eS); } }
       var a=at(A,e.ns);
       if(e.na){ if(a) a.remove(0,0); }          // a window's B-roll is picture only: the film stays quiet there
-      else if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)); a.end=tm(e.ne); }
+      else if(!still && a && Math.abs(a.end.seconds-e.ne)>=0.02){ a.outPoint=tm(e.i+(e.ne-e.ns)+0.001); a.end=tm(e.ne+0.001); }
       else if(!still && !a) note.push(e.l+' no audio');
       n++; }
     return JSON.stringify({done:n,remaining:rem,note:note.slice(0,10)});`,

@@ -232,7 +232,64 @@ intros/outros/name plates, move a section, and be split into separate episodes.
    frames and at the timeline panel itself (`scripts/prwindow.ps1`).
 5. **Split into episodes** by cloning the verified edit and cutting each down.
 
+## Workflow F (raw interview day → one selects sequence per speaker, a question card before each answer)
+
+Use when a sequence holds hours of raw interview takes of several people (start/stop per
+question, retakes, crew talk) and the deliverable is one sequence per speaker: an editable
+title card with the question, then the chosen answer, junk and failed takes removed.
+
+1. **Who is where: look.** Build a throwaway sequence with 1 s from the middle of every clip
+   (`assemble.mjs` rows of 1 s) and export QE frames from it — the RAW is hours long and QE
+   frames past one hour come back from the head. BRAW: ffmpeg reads its audio (pcm_s24le) but
+   not its video, so frames only come out of Premiere. Speakers sit in contiguous clip runs.
+2. **Transcribe in the cloud, per phrase: `scripts/cloudtr.mjs`.** The panel's cloud
+   transcription (Cloud.ru `whisper-large-v3`) silently drops whole 30 s windows of a long
+   clip — 7 of 171 clips lost an answer's first half, an introduction, or everything but the
+   question — and the endpoint answers `words: null`, so there are no word times. `cloudtr`
+   cuts each clip at its own pauses into 3–15 s phrase groups and sends each alone: nothing
+   is dropped and every chunk edge is a pause a blade can use. Extract the audio once
+   (`ffmpeg -map 0:a:0 -ac 1 -ar 16000`), then `--wav-dir`. Chunks can still start or end
+   without their first/last word in the TEXT (the audio is there) — read both transcripts.
+3. **Read every speaker end to end and write a plan** (`{q, src, pieces:[[firstChunk,
+   lastChunk, {start|end anchors}]], note}`): the best complete take per question (usually the
+   last one the crew accepted), answers assembled from pickups where the speaker re-said a
+   sentence, explicit on-set decisions honoured («Концовку убираем», «это можно вырезать»),
+   the question itself cut out. Card text = the question as the interviewer asked it (they
+   read from a newer list than the document); the document's wording only when the question
+   is not on the recording. Record alternatives and cuts in the marker note.
+4. **Cuts inside a phrase group: `scripts/cloudsplit.mjs`** — tries the quiet dips nearest to
+   the word and keeps the one whose PREFIX transcript ends with the word before the cut. The
+   last word must match (a looser match put cuts after «…работодателя. А»); short words need
+   an exact match; Latin/Cyrillic («Atlas»/«атлас») never match — pass `after`. When the model
+   will not hear the anchor, measure the gap on a 5–10 ms level map and pin `t`.
+5. **Read every edge back: `scripts/cloudedges.mjs`**, then every join rendered from the
+   plan (4 s either side). This found: the interviewer's «угу»/«да» carried at chunk edges, a
+   next question glued to an answer's end, «Для»/«Совет» of the next sentence left on a
+   tail, a word's first syllable cut off. Trim edges to SUSTAINED speech (8 of 10 frames over
+   the threshold), not to the first loud frame — a click is loud.
+6. **Cards: `scripts/mogrtcard.py`, one .mogrt per card.** ExtendScript cannot set a graphic's
+   text (`Source Text` reads back as one garbage character, a Premiere-authored .mogrt has no
+   MGT parameters), so the text goes into the template before import: .mogrt → *.prgraphic →
+   *.prproj (gzip XML) → base64 of an 8-byte length + UTF-16 JSON with `mText`. Fresh
+   `capsuleID` per card. After `sequence.importMGT(path, ticks, 0, 0)` set `end` and centre
+   the block: Text › Position y = 0.5165 − (lines−1)·0.0356 at 34 characters a line.
+7. **Build per speaker**: clone an EMPTY template (a clone of the RAW, emptied) → cards first →
+   pieces with `assemble.mjs` → markers (name = question, comment = note + sources, colour =
+   source). Then verify against the plan: position, in-point, end, the A1 partner, no holes,
+   list order, marker count. **`importMGT` loses a card now and then (4 of 107)** — re-import
+   the missing ones, then re-run `assemble.mjs --step place`: the card's 4.92 s default ate the
+   head of the next answer. Look at a frame of every card and every piece.
+8. **Clones inherit the source's In/Out.** Twelve speaker sequences cloned from a RAW with
+   In/Out over four hours would each export four hours of black «In to Out» — set each to
+   `[0, end]`.
+
 ## Hard-won constraints
+
+**Seconds → ticks rounds DOWN.** `projectItem.setInPoint(261.08)` landed on 261.04: the
+piece came out one frame long and ate the first frame — once a whole title card — of the clip
+after it. `assemble.mjs` now aims a millisecond into the frame; do the same in any new JSX
+that turns seconds into a `Time`. Its done-check allows 0.05 s for 30 fps sources, so a piece
+one 25p frame off passes it: remove such a piece and re-place it.
 
 **A bridge timeout is not a failure.** `applyTimecodeEdits` gives up at 120 s and
 `evalJson` at 30 s, but the edit keeps running inside Premiere. Ripple-deleting
