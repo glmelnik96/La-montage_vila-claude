@@ -18,6 +18,9 @@ happens in a clone.
   3237.2–3240.4" would have removed «Можно» and broken a FAQ question; the slide on
   screen at that moment has the exact wording («Можно вынести копии или DR в другой
   контур?»), which settled where the blade goes.
+- **Getting the bundle.** On the board, «Экспорт → Архив для агента» gives the zip. Downloaded in the app's own browser, it sits in Downloads as a `.tmp` that is already the full zip. The user then saves it under its real name, and the two are identical.
+- **"Нужно поискать кусок"** means material the draft left out. Transcribe every take that is not in the draft sequence and search the transcripts by content. The first candidates are the takes recorded between the two used takes that surround the gap. On one job, the platform overview and the «поговорим про преимущества» lead-in sat in C017, recorded between the intro (C015) and the next used take (C020). A take the speaker rejected on the recording («…что-то говорю») is not a candidate.
+- **The long-file transcript hides restarts.** Whisper drops a repeated phrase: «все системы ERP, 1С, … все системы ERP, 1С, SAP» came out as one list with a 4 s hole. Where a cut note sits, compare the level map with the text: speech islands that no word covers are the retake. Read each island alone with the cloud ASR and keep the clean second take.
 - Slide numbers counted **hidden slides** (the reviewer referenced slides 38–40 of
   a deck with only 35 visible). Match slide text against the speech to be sure,
   and export hidden slides too (section 6).
@@ -137,6 +140,12 @@ razors every track, lifts, and moves every piece to an absolute target:
   into empty track. A 3840×2160 still on a 3840×2160 sequence lands at Motion 100.
 - Snap switch points to a pause after a sentence end. Put the switch exactly on a
   cut where one exists: the slide change hides the jump cut underneath.
+- **Replacing the deck in a finished edit.**
+  - Map old → new slides by text (python-pptx + difflib), then look at old|new pairs side by side. Numbers shift: a final deck drops hidden slides and whole topics (41 → 32 on one job).
+  - Review lists keep counting in the deck the reviewer watched. «Слайд 18» there was a hidden slide that the final deck no longer had.
+  - Import the new PNGs into their own bin. Strip only stills whose media path is in the old folder (a screen recording on V2 stays), then place the new set. The `_OLD_` backups keep the old slides.
+  - Each slide missing from the new deck is a decision for the user. Mark it, never drop or keep it silently.
+- **Removing or shortening a slide exposes the cuts under it.** A full-frame slide hides every jump cut on V1 beneath it. Deleting two slides from one episode turned two hidden cuts into visible jumps on the speaker. List the V1 cuts in every range that loses its slide, and mark them.
 - Full-frame slides hide the speaker by design when the notes say "split screen"
   and the instruction is "just put the slide on V2" — say so in the report. But
   look at the timeline before explaining "only slides, no video" away with it: the

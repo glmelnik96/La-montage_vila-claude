@@ -300,6 +300,32 @@ after it. `assemble.mjs` now aims a millisecond into the frame; do the same in a
 that turns seconds into a `Time`. Its done-check allows 0.05 s for 30 fps sources, so a piece
 one 25p frame off passes it: remove such a piece and re-place it.
 
+**Material inserted into an edit must carry its neighbours' clip gain and effects.** Every clip of one draft had Audio Gain +30 dB plus DeNoise. The Audio Gain lives on the track item: QE `trackItem.staticClipGain` reads it in dB, and assigning to it does nothing. A take placed from the bin arrived at 0 dB and rendered 20 dB quieter than the sentence before it, and no DOM value showed it. Before placing a new take, read `staticClipGain` and the neighbours' `components`. Then copy the effects: QE `addAudioEffect`, then the same property values. Restore the gain with Volume Level + Channel Volume L/R, each `setValue(1.0)` = +15 dB, their maximum. Finally measure the render: the insert's speech median against its neighbours'.
+
+**Audio-only files snap their in/out to 29.97 fps.** Premiere interprets a recorder WAV at
+29.97 fps, so `projectItem.setInPoint(136.92)` lands on 136.9034 (the 1/29.97 s grid). On a
+25p timeline the placed piece came out 16–40 ms off the cameras it had been synced to, and
+every DOM position still looked right. After `overwriteClip`, set the track item's own
+`inPoint` and `outPoint` to whole `Time` objects in ticks (`t.ticks = String(frames·10160640000)`).
+That is exact, and start/end stay put. Then prove it: correlate a render of each piece
+against the plan (0.0 ms on 23 of 23 pieces).
+
+**Cutting a synced multicam stack: place every track at absolute targets.** A content cut on
+V1–V3 cameras plus the recorder on A2–A4 must keep the angles in sync for the later
+multicam pass. A ripple delete shifts only the tracks that have something under the range,
+and cameras restart mid-take, so a range in a camera gap desyncs that angle. Instead,
+intersect each kept range with every clip on every track and `overwriteClip` the
+sub-ranges at their new positions. `sequence.overwriteClip(item, t, vIdx, aIdx)` puts a
+camera's picture and its scratch audio on any pair of tracks; `track.overwriteClip` ties V n
+to A n. Then check that every item's `start − in` offset equals the source's.
+
+**Rendering from a script.** `exportAsMediaDirect` returns "Unknown Error" unless the
+sequence is the active one and both paths are native (`new File(p).fsName`).
+`app.encoder.ENCODE_ENTIRE` renders the whole sequence without touching its In/Out. A 1-frame
+In/Out with the «JPEG Sequence (Match Source)» preset gives a rendered frame at any time,
+including past the hour where QE `exportFramePNG` fails. Put In/Out and mute changes on a
+throwaway clone and `deleteSequence` it afterwards.
+
 **A bridge timeout is not a failure.** `applyTimecodeEdits` gives up at 120 s and
 `evalJson` at 30 s, but the edit keeps running inside Premiere. Ripple-deleting
 ~1200 clips takes minutes. Re-issuing the call applies the edit TWICE. Correct
