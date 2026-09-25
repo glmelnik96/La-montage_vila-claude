@@ -41,6 +41,14 @@ This covers the mechanics only. How a graphics pass fits into a workflow is not 
     refreshes it. Disabling the audio in AE changed nothing, with or without a save.
   - The fix that worked: remove the audio part only with `audioTrackItem.remove(false, false)`; the V2 clip
     stays. Better: build comps without audio.
+  - Premiere settles this at a comp's first import, in both directions. Turning the guide audio ON for a comp
+    first imported silent, then saving and re-importing it, gave no audio clip and no `.cfa`. A duplicate of
+    that comp under a new name, with the guide audio on, got an A2 clip and a `.cfa` at once.
+  - `gfxcheck.mjs` caught that duplicate: +6.02 dB under its slot, and +2.06 dB under the full-length logo
+    slot above it. `gfxplace.mjs` strips the audio of every clip from the pass's .aep, planned slot or not.
+- **Deleting a project item takes a detour.** Move it into a fresh bin with `item.moveBin(tmp)`, then call
+  `tmp.deleteBin()`. That removed two duplicate linked items along with the bin; a listing of the parent
+  bin confirmed it. For a sequence use `app.project.deleteSequence(seq)` (SKILL.md).
 - **Re-import duplicates the item.** A second `importAEComps` of the same comp adds another project item with
   a new `nodeId`. Nothing is updated in place.
 - **`getOutPoint()` goes stale on linked items.** After the comp was lengthened from 4 to 5 s and saved, both the
@@ -72,6 +80,17 @@ This covers the mechanics only. How a graphics pass fits into a workflow is not 
   and only the markers move.
 - **`seq.videoTracks.addTracks` is `undefined` on 26.3.2**, contrary to `panel-api-notes.md`. The QE fallback
   `qe.project.getActiveSequence().addTracks` exists.
+- **A cut through a linked clip splits it.** `pr.mjs cut` 0.2–0.6 s ran through the lower third (0.4–4.0 s) and
+  the full-length logo. The lower third lost its first 5 frames: the piece left started 5 frames into the
+  comp, so the entrance was gone. The logo became two clips, 0–5 and 5–440. `gfxresync.mjs` re-anchored the
+  lower third on its marker and re-joined the logo over its pieces. `gfxplace.mjs` then put each back as one
+  whole clip. Live, 2026-09-25: every slot moved as predicted, and `gfxcheck.mjs` found every graphic over
+  the same source frame as before the cut.
+- **After Effects holds the plate open.** The re-render after that cut could not replace `plate.mov`: moving
+  it aside gave `EBUSY`. The Windows Restart Manager named the AE window with the graphics project open;
+  the headless Dynamic Link AE did not hold it. `prexport.freePath` renders to `plate.b.mov` then, and
+  `gfx-build.js` switches the AE item to the file the plan names. After the switch AE held only the new
+  file (ae-motion-live quirk 188).
 
 ## Getting Premiere to a project with no clicks from the user
 
@@ -95,3 +114,30 @@ The panel only loads once a project is open, and Premiere starts on its Home scr
   on 8098 within ~4 s.
 - **The AE panel needs no clicks.** "Extensions LLM Chat" (8092) came back by itself with the workspace, and
   AE started with an untitled project.
+
+`scripts/propen.mjs` puts this together. Live, 2026-09-25:
+
+- **With the panel up it is one call.** `app.openDocument(path, true, true, true)` opened a copy of the
+  template project with no "Convert Project" dialog and no `_1` copy. `open` then listed two projects.
+  `Project.closeDocument(false, false)` on the second one returned `true`, and focus went back to the first.
+- **Closing the last project takes the panel with it.** The bridge call broke off with a closed socket
+  (`WS error`), and the Home screen came up.
+- **On 26.3 the Home screen is its own window.** It is an untitled top-level window over an empty main
+  window. Its class, `DroverLord - Window Class`, is the one Premiere's dialogs have too. propen tells it
+  apart by size: at least 90% of the main window's width and 80% of its height.
+- **UI Automation does not see the "Open Project" button**, so the click goes by offset: (83, 238) from
+  the main window's top-left. Measured on a 2560×1440 screen at 100% scaling, with Premiere maximized.
+- **A click lands on whatever is on top of that point.** With Premiere in the background behind another
+  app, three offset clicks went into that app instead. Nothing opened, and the other app changed what it
+  showed.
+  - `uiclick.ps1` now brings Premiere's own window at the point to the front first, with an ALT tap and
+    `SetForegroundWindow`.
+  - It clicks only if the window under the point then belongs to Premiere. Otherwise it clicks nothing
+    and exits 4.
+  - `-DryRun` does everything except the click.
+- **Timings.**
+  - From the Home screen to the panel with the project focused: 16.5 s.
+  - With the panel already up: 1 s.
+  - From a closed Premiere, which had quit over the bridge after a save (`app.quit()` answers before
+    it exits): 17.1 s, `via: launched, Home screen (offset)`. On the way a 300×140
+    `DroverLord - Overlay Window` popped up in the corner; propen's filter lets overlays through.

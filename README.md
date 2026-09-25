@@ -17,7 +17,7 @@ the Phygital sidecar.
 | F | Raw interview day → selects per speaker with question cards | `references/interview-selects.md` |
 | G | Cameras + a separate recorder → one synced stack | `references/multicam-sync.md` |
 | H | Documentary canvas: interview pieces, B-roll, graphics, subtitles | SKILL.md |
-| I | After Effects graphics over an edit (Dynamic Link) | `references/after-effects-link.md` |
+| I | After Effects graphics over an edit: plan → preview → AE build → Dynamic Link → check | `references/gfx-plan.md` |
 
 Where to read more:
 - [`SKILL.md`](SKILL.md): the skill itself, with the workflows, the rules by topic and the

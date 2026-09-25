@@ -70,6 +70,19 @@ Every script's header comment documents its flags. SKILL.md says which workflow 
   slide tools (`slidetrack.py`, `slidealign.py`, `planverify.py`, …).
 - **Generation (paid):** `gen.mjs`. Always run it with `--dry-run` first and get the user's
   yes.
+- **Graphics (AE), Workflow I, `references/gfx-plan.md`:**
+  - `propen.mjs`: opens a project with no clicks from the user;
+  - `gfxexport.mjs`: writes the plate, `edit.json` and `words.json`;
+  - `gfxplan.mjs`: validates a plan and prints its chat table;
+  - `gfxpreview.py`: draws the plan's boxes over the plate;
+  - `gfxplace.mjs`: imports the AE comps through Dynamic Link, places them by frame and strips
+    their audio;
+  - `gfxcheck.mjs`: renders the sequence, takes one frame per slot and compares the level under
+    the overlays;
+  - `gfxresync.mjs`: runs after a re-edit;
+  - `scripts/win/*.ps1`: captures windows, clicks by name (guarded) and fills a file dialog.
+- **Tests:** `node --test "scripts/tests/*.test.mjs"`. Pass a glob: a directory argument fails on
+  Node 24.
 
 Host code is **ES3** (SKILL.md, «Host scripting»). Arrow functions, `let`/`const`, template
 literals, `Array.prototype.forEach`/`map`/`find`, and reserved words used as keys all fail at

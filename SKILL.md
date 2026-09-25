@@ -235,16 +235,35 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
    When only the B-roll changes, clear V2 and re-place it; V1, the markers and the captions
    stay.
 
-### I. After Effects graphics over an edit (Dynamic Link)
-The mechanics are live-verified; the workflow around them is not designed yet. **Read
-`references/after-effects-link.md` before placing anything from After Effects.** It covers
-`importAEComps`, placement, export cost, and the traps:
-- off-grid times round up;
-- a comp's audio doubles the dialogue and never refreshes;
-- a re-import duplicates the item;
-- `getOutPoint()` goes stale;
-- unsaved AE edits reach the export.
-The AE side of the round trip belongs to the `ae-motion-live` skill.
+### I. After Effects graphics over an edit (with ae-motion-live, returned through Dynamic Link)
+**REQUIRED:** `references/gfx-plan.md` has the files, the plan, the placement rules and the
+commands. `references/after-effects-link.md` has the Dynamic Link traps. The AE half is
+ae-motion-live §5e. The short version:
+1. **Open** the project with `node scripts/propen.mjs --project <path.prproj>`. It needs no
+   clicks from the user, and it brings Premiere to the front. `gfx-build.js` starts AE itself.
+   Work in the edited copy of the sequence.
+2. **Hand the edit over:** `gfxexport.mjs --seq-id <id> --dir <project folder>/<sequence>_gfx`
+   writes the plate (the edit without graphics), `edit.json` and `words.json`. On a first run it
+   also starts `gfx-plan.json`. One folder per sequence: the name rule is in gfx-plan.md.
+3. **Plan:** fill in the slots of `gfx-plan.json` by the rules in gfx-plan.md, with an anchor on
+   every slot. `gfxplan.mjs validate` must pass. If the sequence already has a pass, change that
+   plan; do not start a second one.
+4. **Get approval.** This is the default; skip it only when the task says «без согласования».
+   Send the chat the table (`gfxplan.mjs table`), plus the sheet and the video from
+   `gfxpreview.py`. Wait for «ок» or corrections.
+5. **Build in AE:** ae-motion-live `node scripts/gfx-build.js --plan …`. Read `qa/sheet.png` as
+   an art director, fix, and run again. It rebuilds in place. When a text overflows, shorten it
+   in the plan.
+6. **Place and check:**
+   - Run `gfxplace.mjs`. It also strips any audio of the .aep's clips.
+   - Then run `gfxcheck.mjs`. Every slot must be ok, with the level under each overlay equal to
+     the plate's. Read `check_sheet.png`.
+   - After a re-edit, run `gfxresync.mjs --dry-run`. If it reports errors, fix
+     `gfx-plan.resync.json`. Then run `--apply`, then `gfx-build.js --refresh-plate --no-capture`,
+     then this step again.
+7. **Write down every error on the way.** Record it in the traps doc of the skill it belongs
+   to, give it a guard or a test, and fix the step that misled you. This is the user's
+   standing order.
 
 ## Rules by topic
 
