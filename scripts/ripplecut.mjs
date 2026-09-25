@@ -11,24 +11,31 @@
 //   node scripts/ripplecut.mjs --seq "<active sequence>" --cut <a>,<b> [--batch 12] [--fps 25]
 //
 // a and b sit on the frame grid, in the sequence's current coordinates. The layout after
-// the razor is saved to gen-out/ripple_<seq>_<a>_<b>.json on the first run and every later
-// step works from those absolute positions, so a re-run after a bridge timeout or an error
-// never razors or shifts anything twice.
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+// the razor is saved to <repo>/gen-out/ripple_<sequenceID>_<a>_<b>.json on the first run and
+// every later step works from those absolute positions, so a re-run after a bridge timeout or
+// an error — from any working directory — never razors or shifts anything twice. To cut the
+// same range again after an Undo in Premiere, delete that file first.
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { callBridge } from './lib/prbridge.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 && process.argv[i + 1] !== undefined ? process.argv[i + 1] : d; };
 const SEQ = arg('seq'), CUT = String(arg('cut', '')).split(',').map(Number), BATCH = +arg('batch', 12), FPS = +arg('fps', 25);
 if (!SEQ || CUT.length !== 2 || !(CUT[1] > CUT[0])) { console.error('usage: ripplecut.mjs --seq <name> --cut <a>,<b>'); process.exit(2); }
 const [A, Z] = CUT, D = +(Z - A).toFixed(6), EPS = 0.005;
-const STATE = `gen-out/ripple_${SEQ.replace(/[^\p{L}\p{N}]+/gu, '_')}_${A}_${Z}.json`;
+const GENOUT = fileURLToPath(new URL('../gen-out/', import.meta.url));
+mkdirSync(GENOUT, { recursive: true });
+let STATE;   // keyed by the sequence's ID, set once the active sequence is confirmed
 
 const HEAD = `var SEQ=${JSON.stringify(SEQ)}, FPS=${FPS}, EPS=${EPS}, B=${BATCH};
 var s=app.project.activeSequence;
 function pad(n){return n<10?'0'+n:''+n;}
 function tcOf(sec){ if($._EXT_PRM_ && $._EXT_PRM_._secToTimecode) return $._EXT_PRM_._secToTimecode(sec,FPS);
   var f=Math.round(sec*FPS); return pad(Math.floor(f/(FPS*3600)))+':'+pad(Math.floor(f/(FPS*60))%60)+':'+pad(Math.floor(f/FPS)%60)+';'+pad(f%FPS); }
-function isStill(c){ return Math.abs(c.inPoint.seconds-3600)<0.1 || /[.](png|jpe?g|tiff?|psd|bmp|gif)$/i.test(String(c.name)); }
+function isAV(c){ try{ return /[.](mov|mp4|m4v|mxf|braw|r3d|avi|mts|m2ts|mkv|webm|wav|mp3|m4a|aiff?|flac)$/i.test(String(c.projectItem.getMediaPath())); }catch(e){ return false; } }
+// a still reports the default source range 3599.96-3604.96; a real take can start at 1:00:00 too
+function isStill(c){ return /[.](png|jpe?g|tiff?|psd|bmp|gif)$/i.test(String(c.name)) || (Math.abs(c.inPoint.seconds-3600)<0.1 && !isAV(c)); }
 function clips(){ var o=[],i,j,t,c;
   for(i=0;i<s.videoTracks.numTracks;i++){t=s.videoTracks[i];for(j=0;j<t.clips.numItems;j++){c=t.clips[j];
     o.push({k:'v',tr:i,c:c,st:c.start.seconds,en:c.end.seconds,id:String(c.nodeId)});}}
@@ -65,6 +72,20 @@ async function loop(body, label) {
     if (r.done === 0) throw new Error(`${label} stalled`);
   }
   throw new Error(`${label}: did not converge`);
+}
+
+STATE = join(GENOUT, `ripple_${(await run('return JSON.stringify({id:String(s.sequenceID)});')).id}_${A}_${Z}.json`);
+// Runs before 2026-09-25 keyed the state by the sequence NAME: continue such a run instead of
+// razoring again, but only when its surviving items are found in this very sequence.
+if (!existsSync(STATE)) {
+  const legacy = join(GENOUT, `ripple_${SEQ.replace(/[^\p{L}\p{N}]+/gu, '_')}_${A}_${Z}.json`);
+  if (existsSync(legacy)) {
+    const old = JSON.parse(readFileSync(legacy, 'utf8'));
+    const ids = [...(old.keep || []), ...(old.shifts || [])].map((x) => x.id).slice(0, 200);
+    const hit = (await run(`var m=index(), I=${JSON.stringify(ids)}, n=0, i; for(i=0;i<I.length;i++) if(m[I[i]]) n++; return JSON.stringify({n:n});`)).n;
+    if (ids.length && hit >= 0.8 * ids.length) { writeFileSync(STATE, JSON.stringify(old, null, 1)); console.error(`state: continuing the run recorded in ${legacy}`); }
+    else console.error(`state: ${legacy} is another sequence's (${hit}/${ids.length} items here), ignored`);
+  }
 }
 
 // 1. razor every non-still clip that crosses a or b — on the first run only: once the items
@@ -157,8 +178,11 @@ const mk = await run(`var M=${JSON.stringify(st.marks)}, mm=s.markers, all=[], k
       try{ nw.setColorByIndex(hit.getColorByIndex()); }catch(e1){}
       mm.deleteMarker(hit); made++; }
     done++; }
-  if(Math.abs(parseFloat(s.getOutPoint())-${st.outTg})>EPS) s.setOutPoint(${st.outTg});
-  if(Math.abs(parseFloat(s.getInPoint())-${st.inTg})>EPS && ${st.inP}>=0) s.setInPoint(${st.inTg});
+  // an unset In/Out reads -400000: leave it unset (and never paste a negative number after a
+  // minus sign — "x--400000" is a decrement and the whole script fails to parse)
+  var OT=(${st.outTg}), IT=(${st.inTg});
+  if((${st.outP})>=0 && Math.abs(parseFloat(s.getOutPoint())-OT)>EPS) s.setOutPoint(OT);
+  if((${st.inP})>=0 && Math.abs(parseFloat(s.getInPoint())-IT)>EPS) s.setInPoint(IT);
   return JSON.stringify({done:done, recreated:made, bad:bad, out:parseFloat(s.getOutPoint())});`);
 if (mk.bad.length) throw new Error(`markers: ${mk.bad}`);
 console.error(`  markers moved: ${mk.done}${mk.recreated ? ` (${mk.recreated} re-created)` : ''}; out ${mk.out}`);

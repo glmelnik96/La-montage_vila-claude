@@ -24,6 +24,8 @@ import { callBridge } from './lib/prbridge.mjs';
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const SRC = arg('src'), SEQ = arg('seq'), STEP = arg('step'), B = +arg('batch', 8);
 const only = arg('only') ? new Set(arg('only').split(',')) : null;
+// `empty` removes every clip of --seq: it must never be the source
+if (SRC && SEQ && SRC === SEQ) { console.error('--seq must differ from --src: the new sequence gets emptied'); process.exit(2); }
 let plan = arg('plan') ? JSON.parse(readFileSync(arg('plan'), 'utf8')) : [];
 if (only) plan = plan.filter((r) => only.has(r.label));
 // t = video track index (0 = V1; its audio lands on the same-index audio track by itself),
@@ -46,6 +48,7 @@ async function run(body) {
   if (r && r.error) throw new Error(JSON.stringify(r));
   return r;
 }
+const notes = [];
 async function loop(body, label) {
   for (let pass = 1; pass <= 400; pass++) {
     let r;
@@ -54,6 +57,7 @@ async function loop(body, label) {
       throw e;
     }
     console.error(`  ${label} pass ${pass}: done ${r.done}, remaining ${r.remaining}${r.note ? ' ' + JSON.stringify(r.note) : ''}`);
+    if (r.note) notes.push(...r.note);
     if (r.remaining === 0) return r;
     if (r.done === 0) throw new Error(`${label} stalled: ${JSON.stringify(r)}`);
   }
@@ -63,13 +67,15 @@ async function loop(body, label) {
 const BODY = {
   prepare: `
     if(!S) return JSON.stringify({error:'no source sequence'});
+    var reused=!!N;
     if(!N){ var before={}; for(i=0;i<p.sequences.numSequences;i++) before[String(p.sequences[i].sequenceID)]=1;
       S.clone(); for(i=0;i<p.sequences.numSequences;i++){ var r=p.sequences[i]; if(!before[String(r.sequenceID)]) N=r; }
       if(!N) return JSON.stringify({error:'clone not found'}); N.name=${JSON.stringify(SEQ)}; }
     p.openSequence(N.sequenceID); var s=p.activeSequence;
-    return JSON.stringify({active:String(s.name), id:String(N.sequenceID), v1:s.videoTracks[0].clips.numItems, a1:s.audioTracks[0].clips.numItems});`,
+    return JSON.stringify({active:String(s.name), id:String(N.sequenceID), reused:reused, v1:s.videoTracks[0].clips.numItems, a1:s.audioTracks[0].clips.numItems});`,
   empty: `
     var s=p.activeSequence; if(String(s.name)!==${JSON.stringify(SEQ)}) return JSON.stringify({error:'active is '+s.name});
+    if(S && String(s.sequenceID)===String(S.sequenceID)) return JSON.stringify({error:'refusing to empty the source sequence'});
     var n=0,t,tr;
     for(t=0;t<s.videoTracks.numTracks&&n<${B * 4};t++){tr=s.videoTracks[t];while(tr.clips.numItems>0&&n<${B * 4}){tr.clips[tr.clips.numItems-1].remove(0,1);n++;}}
     for(t=0;t<s.audioTracks.numTracks&&n<${B * 4};t++){tr=s.audioTracks[t];while(tr.clips.numItems>0&&n<${B * 4}){tr.clips[tr.clips.numItems-1].remove(0,1);n++;}}
@@ -81,11 +87,13 @@ const BODY = {
     function at(tr,t0){for(var q=0;q<tr.clips.numItems;q++){if(Math.abs(tr.clips[q].start.seconds-t0)<0.02) return tr.clips[q];}return null;}
     function tm(x){var t=new Time();t.seconds=x;return t;}
     function mot(c){for(var q=0;q<c.components.numItems;q++){if(String(c.components[q].matchName)==='AE.ADBE Motion') return c.components[q];}return null;}
+    function isAV(pi){try{return /[.](mov|mp4|m4v|mxf|braw|r3d|avi|mts|m2ts|mkv|webm|wav|mp3|m4a|aiff?|flac)$/i.test(String(pi.getMediaPath()));}catch(e0){return false;}}
     var rem=0;
     for(k=0;k<P.length;k++){ var e=P[k]; V=s.videoTracks[e.t]; A=s.audioTracks[e.t];
       var v=at(V,e.ns), src=SV.clips[e.c], pi=src.projectItem;
       // a still reports its default source range 3599.96-3604.96: no in-point to compare, no audio
-      var still=Math.abs(src.inPoint.seconds-3600)<0.1;
+      // (a real take can start at 1:00:00 too, hence the media-type test)
+      var still=Math.abs(src.inPoint.seconds-3600)<0.1 && !isAV(pi);
       // a 30 fps source reports its in-point on its own 1/30 s grid: allow a frame and a half,
       // or a placed vlog piece never counts as done and is overwritten on every pass
       if(v && String(v.name)===String(src.name) && (still || Math.abs(v.inPoint.seconds-e.i)<0.05) && Math.abs(v.end.seconds-e.ne)<0.05) continue;
@@ -93,7 +101,7 @@ const BODY = {
       // seconds -> ticks rounds DOWN: 261.08 became 261.04, the piece came out a frame long and
       // ate the first frame of the clip after it (a whole title card, once). Aim a millisecond in.
       if(!still){ pi.setInPoint(e.i+0.001,4); pi.setOutPoint(e.o+0.001,4); }
-      V.overwriteClip(pi,e.ns);
+      V.overwriteClip(pi,e.ns+0.001);      // the placement rounds down too
       if(!still){ try{pi.clearInPoint();pi.clearOutPoint();}catch(e1){ pi.setInPoint(0,4); } }
       v=at(V,e.ns);
       if(!v){ note.push(e.l+' not placed'); n++; continue; }
@@ -120,5 +128,8 @@ const BODY = {
 };
 
 if (STEP === 'prepare' || STEP === 'check') console.log(JSON.stringify(await run(BODY[STEP]), null, 1));
-else if (STEP === 'empty' || STEP === 'place') await loop(BODY[STEP], STEP);
+else if (STEP === 'empty' || STEP === 'place') {
+  await loop(BODY[STEP], STEP);
+  if (notes.length) { console.error(`${STEP} finished with ${notes.length} note(s) — check them: ${JSON.stringify(notes)}`); process.exit(1); }
+}
 else { console.error('unknown step'); process.exit(2); }

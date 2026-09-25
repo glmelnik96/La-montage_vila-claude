@@ -111,8 +111,17 @@ async function main() {
     upscale: { node: 87,  build: () => ({ output_upscale: argVal(argv, '--scale') || 'X2', output_container: 'mp4' }) },
   };
   if (cmd === 'health') { const r = await fetch(cfg.sidecarBaseUrl + '/health'); out(await r.json()); return; }
+  if (cmd === 'fetch') {   // collect a job whose run was interrupted: gen.mjs fetch --job <id> [--out <path>]
+    const jobId = argVal(argv, '--job');
+    if (!jobId) { console.error('Usage: gen.mjs fetch --job <jobId> [--out <path>]'); process.exit(2); }
+    const job = await pollJob(jobId);
+    if (job.status !== 'completed') { out({ ok: false, status: job.status, error: job.error, jobId }); process.exit(1); }
+    const saved = await downloadResult(job, argVal(argv, '--out') || join(process.cwd(), 'gen-out', `${jobId}`));
+    out({ ok: true, jobId, saved, resultPaths: job.result_paths });
+    return;
+  }
   const spec = specs[cmd];
-  if (!spec) { console.error('Usage: gen.mjs <health|image|video|voice|upscale> [--prompt ..] [--out ..] [--dry-run]'); process.exit(2); }
+  if (!spec) { console.error('Usage: gen.mjs <health|image|video|voice|upscale|fetch> [--prompt ..] [--out ..] [--dry-run] [--job <id>]'); process.exit(2); }
 
   const params = spec.build();
   if (dryRun) { out({ dryRun: true, node: spec.node, params, cost: await previewCost(spec.node, params) }); return; }
@@ -122,6 +131,8 @@ async function main() {
   const initFiles = inFile ? (cmd === 'upscale' ? { init_video: inFile } : { init_img: [inFile] }) : undefined;
 
   const jobId = await createJob(spec.node, params, initFiles);
+  // printed at once: if this run is killed, the paid job still finishes — collect it with `fetch`
+  console.error(`job ${jobId} created (paid). If this run is interrupted: node scripts/gen.mjs fetch --job ${jobId} --out <path>`);
   const job = await pollJob(jobId);
   if (job.status !== 'completed') { out({ ok: false, status: job.status, error: job.error, jobId }); process.exit(1); }
   const outPath = argVal(argv, '--out') || join(process.cwd(), 'gen-out', `${jobId}`);

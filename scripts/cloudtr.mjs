@@ -2,61 +2,44 @@
 // pauses, send every phrase group to the Cloud.ru Whisper endpoint on its own, and keep the
 // measured audio edges instead of the model's timestamps.
 //
-//   node scripts/cloudtr.mjs --wav-dir <dir of C###.wav, 16 kHz mono> --out-dir <dir>
-//        [--only C014,C050] [--jobs 6] [--min 3] [--max 15] [--gap 0.35]
-//   node scripts/cloudtr.mjs --wav-dir <dir> --pieces pieces.json --out result.json [--jobs 6]
+//   node scripts/cloudtr.mjs --wav-dir <dir of C###.wav, 16-bit mono> --out-dir <dir>
+//        [--only C014,C050] [--jobs 6] [--min 3] [--max 15] [--gap 0.35] [--lang ru]
+//   node scripts/cloudtr.mjs --wav-dir <dir> --pieces pieces.json --out result.json [--jobs 6] [--resume]
 //        pieces.json: [{"key", "clip": "C043", "a": 3.28, "b": 36.1, "prompt": "names, terms"}]
 //        -> {key: [{s, e, text}]}: the same phrase groups, but only inside [a, b], sent in order,
 //        each with `prompt` + the tail of the previous phrase as context — a transcript of the
 //        pieces of an edit, for reading. The context fixes names and terms («Семдиби» -> CMDB)
-//        and carries a sentence across a chunk edge.
+//        and carries a sentence across a chunk edge. The result file is rewritten after every
+//        piece; --resume skips the keys it already holds. A piece whose requests failed gets
+//        {"error"} instead of rows, and the run exits 1.
 //
 // Why: the endpoint (openai/whisper-large-v3 on foundation-models.api.cloud.ru) answers
 // `words: null` even when asked for timestamp_granularities[]=word, and a long file comes back
 // with whole 30 s windows silently missing (seen on 7 of 171 interview clips: an answer's first
 // half, a speaker's introduction, one reply reduced to the question that preceded it). A phrase
-// group of 3–15 s between measured pauses is one decoding window: nothing is dropped, and every
-// chunk edge is a pause — a blade can go there.
+// group between measured pauses (usually 3–15 s; speech with no pause for longer is split near
+// every 20 s, so a chunk can reach 25 s) is one decoding window: nothing is dropped, and every
+// chunk edge is a pause — a blade can go there. Only files named C<digits>.wav are read.
 //
 // Output per clip: <out-dir>/C###.json = [{s, e, text, lp, nsp}] in seconds of the clip's own
-// audio (= source time of the media file). The API key is read from the panel's fm-secrets.js
-// (config.json repos.llmChatPr); nothing is printed.
-import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
+// audio (= source time of the media file), written only when every chunk of the clip came back;
+// a clip with a failed request gets no file (a re-run picks it up) and the run exits 1. The API
+// key is read from the panel's fm-secrets.js (config.json repos.llmChatPr); nothing is printed.
+import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { apiKey, readWav, wavBlob, transcribe, writeJsonAtomic } from './lib/cloudasr.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const WAVDIR = arg('wav-dir'), OUT = arg('out-dir'), JOBS = +arg('jobs', 6), PIECES = arg('pieces');
 const MIN = +arg('min', 3), MAX = +arg('max', 15), GAP = +arg('gap', 0.35);
-const only = arg('only') ? new Set(arg('only').split(',')) : null;
-if (!WAVDIR || (!OUT && !PIECES)) { console.error('usage: cloudtr.mjs --wav-dir <dir> --out-dir <dir> [--only C014] | --pieces p.json --out r.json'); process.exit(2); }
+const only = arg('only') ? new Set(arg('only').split(',')) : null, LANG = arg('lang', 'ru');
+if (!WAVDIR || (!OUT && !PIECES) || (PIECES && !arg('out'))) { console.error('usage: cloudtr.mjs --wav-dir <dir> --out-dir <dir> [--only C014] | --pieces p.json --out r.json [--resume]'); process.exit(2); }
 if (OUT) mkdirSync(OUT, { recursive: true });
 
-const cfg = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
-const sec = readFileSync(join(cfg.repos.llmChatPr, 'client/shared/fm-secrets.js'), 'utf8');
-const KEY = (sec.match(/apiKey\s*:\s*['"]([^'"]+)['"]/) || [])[1];
-if (!KEY) { console.error('no apiKey in fm-secrets.js'); process.exit(2); }
-const URL_TR = 'https://foundation-models.api.cloud.ru/v1/audio/transcriptions';
+let KEY;
+try { KEY = apiKey(); } catch (e) { console.error(e.message); process.exit(2); }
 const JUNK = /продолжение следует|субтитр|корректор|редактор|dimatorzok|спасибо за просмотр|подписывайтесь|amara/i;
 
-function readWav(p) {
-  const b = readFileSync(p);
-  let off = 12, sr = 16000, data = null;
-  while (off < b.length - 8) {
-    const id = b.toString('ascii', off, off + 4), size = b.readUInt32LE(off + 4);
-    if (id === 'fmt ') sr = b.readUInt32LE(off + 12);
-    if (id === 'data') { data = new Int16Array(b.buffer, b.byteOffset + off + 8, Math.floor(Math.min(size, b.length - off - 8) / 2)); break; }
-    off += 8 + size + (size & 1);
-  }
-  return { sr, pcm: data };
-}
-function wavBlob(pcm, sr, a, b) {
-  const s = pcm.subarray(Math.max(0, Math.floor(a * sr)), Math.min(pcm.length, Math.ceil(b * sr)));
-  const h = Buffer.alloc(44);
-  h.write('RIFF', 0); h.writeUInt32LE(36 + s.length * 2, 4); h.write('WAVE', 8); h.write('fmt ', 12);
-  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(sr, 24);
-  h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(s.length * 2, 40);
-  return new Blob([h, Buffer.from(s.buffer, s.byteOffset, s.length * 2)], { type: 'audio/wav' });
-}
 // 10 ms RMS in dBFS
 function envelope(pcm, sr) {
   const n = Math.floor(sr / 100), out = new Float32Array(Math.floor(pcm.length / n));
@@ -109,24 +92,7 @@ function chunksOf(db, f0 = 0, f1 = db.length) {
   }
   return { chunks: out, T: Math.round(T * 10) / 10, floor: Math.round(floor * 10) / 10 };
 }
-async function post(blob, name, prompt) {
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    const form = new FormData();
-    form.append('file', blob, name);
-    form.append('model', 'openai/whisper-large-v3');
-    form.append('language', 'ru');
-    form.append('response_format', 'verbose_json');
-    form.append('temperature', '0.1');
-    if (prompt) form.append('prompt', prompt);
-    try {
-      const r = await fetch(URL_TR, { method: 'POST', headers: { Authorization: 'Bearer ' + KEY }, body: form });
-      const t = await r.text();
-      if (r.ok) return JSON.parse(t);
-      if (r.status < 500 && r.status !== 429) throw new Error(`HTTP ${r.status}: ${t.slice(0, 200)}`);
-    } catch (e) { if (attempt === 5) throw e; }
-    await new Promise((res) => setTimeout(res, 1500 * attempt));
-  }
-}
+const post = (blob, name, prompt) => transcribe(blob, { key: KEY, name, prompt, format: 'verbose_json', lang: LANG });
 
 if (PIECES) {
   // pieces of an edit: chunk inside each piece, transcribe its chunks in order with context
@@ -136,60 +102,73 @@ if (PIECES) {
     if (!wavs[clip]) { const w = readWav(join(WAVDIR, clip + '.wav')); wavs[clip] = { ...w, db: envelope(w.pcm, w.sr) }; }
     return wavs[clip];
   };
-  const result = {};
+  const OUTF = arg('out');
+  const result = process.argv.includes('--resume') && existsSync(OUTF) ? JSON.parse(readFileSync(OUTF, 'utf8')) : {};
+  const todo = list.filter((p) => !Array.isArray(result[p.key]));
+  if (todo.length < list.length) console.error(`resume: ${list.length - todo.length} pieces already done`);
   let nextP = 0, doneP = 0;
+  const failed = [];
   await Promise.all(Array.from({ length: JOBS }, async () => {
-    while (nextP < list.length) {
-      const p = list[nextP++], w = load(p.clip), dur = w.pcm.length / w.sr;
-      let { chunks } = chunksOf(w.db, Math.floor(p.a * 100), Math.ceil(p.b * 100));
-      if (!chunks.length) chunks = [[p.a, p.b]];
-      const rows = [];
-      let prev = '';
-      // Each phrase group is read twice: with the context (names and terms come out right) and
-      // without it (a prompt can derail a quiet phrase into invented text — «будут в следующем
-      // году» for «останутся фундаментальными»). The reading with the better mean log-probability
-      // wins, the prompted one on a near tie; an implausibly sparse reading (< 6 chars/s) loses.
-      const read = async (a0, b0, ctx) => {
-        const d = await post(wavBlob(w.pcm, w.sr, a0, b0), `${p.key}.wav`, ctx);
-        const segs = d.segments || [];
-        const n = segs.reduce((x, g) => x + Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0);
-        const lp = segs.length ? segs.reduce((x, g) => x + (g.avg_logprob ?? -1) * Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0) / n : -9;
-        let text = String(d.text || '').trim();
-        if (JUNK.test(text) && b0 - a0 < 4) text = '';
-        return { text, lp };
-      };
-      // Whisper copies the style of its prompt: an unpunctuated lower-case phrase used as context
-      // makes the next one come back the same way, and a run of them spreads through an answer
-      // (10 % of the phrases of one job). So the context is the previous phrase only when it is
-      // punctuated, the prompt carries a punctuated style sample, and a punctuated reading beats
-      // an unpunctuated one of similar length.
-      const STYLE = 'Вот как это выглядит: мы работаем с клиентами, помогаем им правильно осваивать технологии. Это важно.';
-      const punct = (t) => (t.match(/[.,!?—:;]/g) || []).length / Math.max(1, t.length) * 100;
-      const bare = (t) => t.length > 60 && punct(t) < 0.9;
-      for (const [a, b] of chunks) {
-        const pa = Math.max(p.a, a - 0.12), pb = Math.min(p.b, dur, b + 0.12);
-        const ctx = [p.prompt || '', STYLE, bare(prev) ? '' : prev.slice(-160)].filter(Boolean).join(' ');
-        const A = await read(pa, pb, ctx), B = await read(pa, pb, '');
-        const ok = (r) => r.text.length / Math.max(0.5, b - a) >= 6 || (b - a < 2 && r.text.length > 0);
-        const similar = A.text.length && B.text.length / A.text.length > 0.7 && B.text.length / A.text.length < 1.4;
-        let pick = A, alt = B;
-        if (ok(A) && ok(B)) {
-          if (bare(A.text) && !bare(B.text) && similar) { pick = B; alt = A; }
-          else if (!(bare(B.text) && !bare(A.text) && similar) && B.lp > A.lp + 0.15) { pick = B; alt = A; }
+    while (nextP < todo.length) {
+      const p = todo[nextP++];
+      try {
+        const w = load(p.clip), dur = w.pcm.length / w.sr;
+        let { chunks } = chunksOf(w.db, Math.floor(p.a * 100), Math.ceil(p.b * 100));
+        if (!chunks.length) chunks = [[p.a, p.b]];
+        const rows = [];
+        let prev = '';
+        // Each phrase group is read twice: with the context (names and terms come out right) and
+        // without it (a prompt can derail a quiet phrase into invented text — «будут в следующем
+        // году» for «останутся фундаментальными»). The reading with the better mean log-probability
+        // wins, the prompted one on a near tie; an implausibly sparse reading (< 6 chars/s) loses.
+        const read = async (a0, b0, ctx) => {
+          const d = await post(wavBlob(w, a0, b0), `${p.key}.wav`, ctx);
+          const segs = d.segments || [];
+          const n = segs.reduce((x, g) => x + Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0);
+          const lp = segs.length ? segs.reduce((x, g) => x + (g.avg_logprob ?? -1) * Math.max(0.01, (g.end ?? 0) - (g.start ?? 0)), 0) / n : -9;
+          let text = String(d.text || '').trim();
+          if (JUNK.test(text) && b0 - a0 < 4) text = '';
+          return { text, lp };
+        };
+        // Whisper copies the style of its prompt: an unpunctuated lower-case phrase used as context
+        // makes the next one come back the same way, and a run of them spreads through an answer
+        // (10 % of the phrases of one job). So a long unpunctuated phrase (> 60 characters) is never
+        // used as context, the prompt carries a punctuated style sample, and a punctuated reading
+        // beats an unpunctuated one of similar length. A phrase that comes back implausibly sparse
+        // in both readings is flagged `sparse`: re-read it in ~7 s windows (--pieces over sub-ranges).
+        const STYLE = 'Вот как это выглядит: мы работаем с клиентами, помогаем им правильно осваивать технологии. Это важно.';
+        const punct = (t) => (t.match(/[.,!?—:;]/g) || []).length / Math.max(1, t.length) * 100;
+        const bare = (t) => t.length > 60 && punct(t) < 0.9;
+        for (const [a, b] of chunks) {
+          const pa = Math.max(p.a, a - 0.12), pb = Math.min(p.b, dur, b + 0.12);
+          const ctx = [p.prompt || '', STYLE, bare(prev) ? '' : prev.slice(-160)].filter(Boolean).join(' ');
+          const A = await read(pa, pb, ctx), B = await read(pa, pb, '');
+          const ok = (r) => r.text.length / Math.max(0.5, b - a) >= 6 || (b - a < 2 && r.text.length > 0);
+          const similar = A.text.length && B.text.length / A.text.length > 0.7 && B.text.length / A.text.length < 1.4;
+          let pick = A, alt = B;
+          if (ok(A) && ok(B)) {
+            if (bare(A.text) && !bare(B.text) && similar) { pick = B; alt = A; }
+            else if (!(bare(B.text) && !bare(A.text) && similar) && B.lp > A.lp + 0.15) { pick = B; alt = A; }
+          }
+          else if (!ok(A) && ok(B)) { pick = B; alt = A; }
+          else if (!ok(A) && !ok(B) && B.text.length > A.text.length) { pick = B; alt = A; }
+          rows.push({ s: +a.toFixed(2), e: +b.toFixed(2), text: pick.text, lp: +pick.lp.toFixed(3), alt: alt.text,
+            flag: !ok(pick) ? 'sparse' : bare(pick.text) ? 'unpunctuated' : undefined });
+          if (pick.text) prev = pick.text;
         }
-        else if (!ok(A) && ok(B)) { pick = B; alt = A; }
-        else if (!ok(A) && !ok(B) && B.text.length > A.text.length) { pick = B; alt = A; }
-        rows.push({ s: +a.toFixed(2), e: +b.toFixed(2), text: pick.text, lp: +pick.lp.toFixed(3), alt: alt.text,
-          flag: !ok(pick) ? 'sparse' : bare(pick.text) ? 'unpunctuated' : undefined });
-        if (pick.text) prev = pick.text;
+        result[p.key] = rows;
+      } catch (e) {
+        result[p.key] = { error: String(e.message || e) };
+        failed.push(p.key);
+        console.error(`  FAILED ${p.key}: ${e.message}`);
       }
-      result[p.key] = rows;
-      if (++doneP % 10 === 0) console.error(`  ${doneP}/${list.length} pieces`);
+      writeJsonAtomic(OUTF, result, 1);
+      if (++doneP % 10 === 0) console.error(`  ${doneP}/${todo.length} pieces`);
     }
   }));
-  writeFileSync(arg('out'), JSON.stringify(result, null, 1));
-  console.error(`done: ${Object.keys(result).length} pieces`);
-  process.exit(0);
+  writeJsonAtomic(OUTF, result, 1);
+  console.error(`done: ${Object.keys(result).length} pieces${failed.length ? `, ${failed.length} FAILED (re-run with --resume): ${failed.join(', ')}` : ''}`);
+  process.exit(failed.length ? 1 : 0);
 }
 
 const files = readdirSync(WAVDIR).filter((f) => /^C\d+\.wav$/.test(f) && (!only || only.has(f.replace('.wav', ''))));
@@ -202,18 +181,22 @@ for (const f of files) {
   const db = envelope(pcm, sr);
   const { chunks, T, floor } = chunksOf(db);
   const dur = pcm.length / sr;
-  perClip[id] = { n: chunks.length, rows: new Array(chunks.length), T, floor, dur };
+  perClip[id] = { n: chunks.length, left: chunks.length, rows: new Array(chunks.length), T, floor, dur, failed: false };
   chunks.forEach(([a, b], k) => {
     const pa = Math.max(0, a - 0.12), pb = Math.min(dur, b + 0.12);
-    tasks.push({ id, k, a, b, blob: wavBlob(pcm, sr, pa, pb) });
+    tasks.push({ id, k, a, b, blob: wavBlob({ sr, pcm }, pa, pb) });
   });
 }
 console.error(`${Object.keys(perClip).length} clips, ${tasks.length} chunks, ${Math.round(tasks.reduce((s, t) => s + t.b - t.a, 0))} s of speech`);
 let next = 0, done = 0;
+const failedClips = new Set();
 async function worker() {
   while (next < tasks.length) {
     const t = tasks[next++];
-    const d = await post(t.blob, `${t.id}_${t.k}.wav`);
+    if (perClip[t.id].failed) continue;
+    let d;
+    try { d = await post(t.blob, `${t.id}_${t.k}.wav`); }
+    catch (e) { perClip[t.id].failed = true; failedClips.add(t.id); console.error(`  FAILED ${t.id} chunk ${t.k}: ${e.message}`); continue; }
     const segs = d.segments || [];
     const lp = segs.length ? Math.min(...segs.map((s) => s.avg_logprob ?? 0)) : 0;
     const nsp = segs.length ? Math.max(...segs.map((s) => s.no_speech_prob ?? 0)) : 0;
@@ -222,8 +205,9 @@ async function worker() {
     perClip[t.id].rows[t.k] = { s: +t.a.toFixed(2), e: +t.b.toFixed(2), text, lp: +lp.toFixed(3), nsp: +(nsp || 0).toFixed(3) };
     if (++done % 50 === 0) console.error(`  ${done}/${tasks.length}`);
     const pc = perClip[t.id];
-    if (pc.rows.every(Boolean)) writeFileSync(join(OUT, t.id + '.json'), JSON.stringify({ T: pc.T, floor: pc.floor, dur: pc.dur, rows: pc.rows }));
+    if (--pc.left === 0 && !pc.failed) writeJsonAtomic(join(OUT, t.id + '.json'), { T: pc.T, floor: pc.floor, dur: pc.dur, rows: pc.rows });
   }
 }
 await Promise.all(Array.from({ length: JOBS }, worker));
-console.error(`done: ${done} chunks`);
+console.error(`done: ${done} chunks${failedClips.size ? `; FAILED clips, no file written (re-run): ${[...failedClips].join(', ')}` : ''}`);
+process.exit(failedClips.size ? 1 : 0);

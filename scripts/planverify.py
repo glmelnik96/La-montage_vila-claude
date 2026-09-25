@@ -30,7 +30,8 @@ SRCW, SRCH = 1920, 1080
 
 def grab(src, t):
     o = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{t:.2f}', '-i', src, '-frames:v', '1',
-                        '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'], capture_output=True).stdout
+                        '-vf', f'scale={SRCW}:{SRCH}', '-pix_fmt', 'rgb24', '-f', 'rawvideo', '-'],
+                       capture_output=True).stdout
     if len(o) < SRCW * SRCH * 3:
         return Image.new('RGB', (CW, CH))
     return Image.frombytes('RGB', (SRCW, SRCH), o[:SRCW * SRCH * 3]).resize((CW, CH), Image.BOX)

@@ -7,9 +7,13 @@
 //   splits.json: [{"key": "A5a", "clip": "C021", "s": 0.03, "e": 13.06, "after": "меняться"}, ...]
 //     after = the last word BEFORE the cut (for "start at X" give the word preceding X).
 //     optional "t": a cut measured by hand on a level map — only read back, not searched.
-//   found.json: [{"key", "t", "gap": [a, b], "prefix", "suffix", "ok", "loose"?, "manual"?}]
+//     optional "text": the chunk's transcript — places the first guess where the word should be.
+//   options: --par 4 (parallel jobs), --lang ru
+//   found.json: [{"key", "t", "gap": [a, b], "prefix", "suffix", "ok", "loose"?, "manual"?, "error"?}]
 //     t is inside the pause: 0.10 s before the next word when the pause is long, its middle
 //     when it is short. Trim the piece to sustained speech afterwards.
+//     ok:false + loose:true = the word was found only SECOND to last — the cut is one word late;
+//     decide by hand. A failed request is an "error", never an empty transcript; the run exits 1.
 //
 // How: 10 ms envelope of the chunk; every dip of >= 30 ms under the chunk's own threshold is a
 // candidate. Candidates are tried nearest-first to where the word should be (by its character
@@ -18,50 +22,17 @@
 // a prefix that ends right and a suffix that starts right is a cut that will sound clean.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { apiKey, readWav, wavBlob, transcribe } from './lib/cloudasr.mjs';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : d; };
 const WAVDIR = arg('wav-dir'), JOBS = JSON.parse(readFileSync(arg('jobs'), 'utf8')), OUT = arg('out'), PAR = +arg('par', 4);
-const cfg = JSON.parse(readFileSync(new URL('../config.json', import.meta.url), 'utf8'));
-const KEY = (readFileSync(join(cfg.repos.llmChatPr, 'client/shared/fm-secrets.js'), 'utf8').match(/apiKey\s*:\s*['"]([^'"]+)['"]/) || [])[1];
-const URL_TR = 'https://foundation-models.api.cloud.ru/v1/audio/transcriptions';
+let KEY;
+try { KEY = apiKey(); } catch (e) { console.error(e.message); process.exit(2); }
+const LANG = arg('lang', 'ru');
 
 const wavs = {};
-function wav(clip) {
-  if (wavs[clip]) return wavs[clip];
-  const b = readFileSync(join(WAVDIR, clip + '.wav'));
-  let off = 12, sr = 16000, pcm = null;
-  while (off < b.length - 8) {
-    const id = b.toString('ascii', off, off + 4), size = b.readUInt32LE(off + 4);
-    if (id === 'fmt ') sr = b.readUInt32LE(off + 12);
-    if (id === 'data') { pcm = new Int16Array(b.buffer, b.byteOffset + off + 8, Math.floor(Math.min(size, b.length - off - 8) / 2)); break; }
-    off += 8 + size + (size & 1);
-  }
-  return (wavs[clip] = { sr, pcm });
-}
-function blob({ sr, pcm }, a, b) {
-  const s = pcm.subarray(Math.max(0, Math.floor(a * sr)), Math.min(pcm.length, Math.ceil(b * sr)));
-  const h = Buffer.alloc(44);
-  h.write('RIFF', 0); h.writeUInt32LE(36 + s.length * 2, 4); h.write('WAVE', 8); h.write('fmt ', 12);
-  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(sr, 24);
-  h.writeUInt32LE(sr * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34); h.write('data', 36); h.writeUInt32LE(s.length * 2, 40);
-  return new Blob([h, Buffer.from(s.buffer, s.byteOffset, s.length * 2)], { type: 'audio/wav' });
-}
-async function asr(w, a, b) {
-  for (let attempt = 1; attempt <= 4; attempt++) {
-    const form = new FormData();
-    form.append('file', blob(w, a, b), 'x.wav');
-    form.append('model', 'openai/whisper-large-v3');
-    form.append('language', 'ru');
-    form.append('response_format', 'json');
-    form.append('temperature', '0.1');
-    try {
-      const r = await fetch(URL_TR, { method: 'POST', headers: { Authorization: 'Bearer ' + KEY }, body: form });
-      if (r.ok) return String((await r.json()).text || '').trim();
-    } catch {}
-    await new Promise((res) => setTimeout(res, 1200 * attempt));
-  }
-  return '';
-}
+const wav = (clip) => wavs[clip] || (wavs[clip] = readWav(join(WAVDIR, clip + '.wav')));
+const asr = async (w, a, b) => String((await transcribe(wavBlob(w, a, b), { key: KEY, lang: LANG })).text || '').trim();
 const norm = (t) => t.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
 const lastWords = (t, n) => norm(t).split(' ').filter(Boolean).slice(-n);
 // Two spellings of one word: equal, or (both longer than 3 letters) sharing their first
@@ -133,20 +104,24 @@ async function solve(job) {
   }
   if (loose) {
     const t = cut(loose.r), suffix = await asr(w, t, Math.min(job.e + 0.1, t + 6));
-    return { key: job.key, clip: job.clip, t: +t.toFixed(2), gap: loose.r, prefix: loose.prefix.slice(-80), suffix: suffix.slice(0, 80), ok: true, loose: true };
+    return { key: job.key, clip: job.clip, t: +t.toFixed(2), gap: loose.r, prefix: loose.prefix.slice(-80), suffix: suffix.slice(0, 80), ok: false, loose: true };
   }
   return { key: job.key, clip: job.clip, ok: false, runs: runs.map((r) => r.map((x) => +x.toFixed(2))), tried };
 }
 
 const out = [];
-let next = 0;
+let next = 0, errors = 0;
 await Promise.all(Array.from({ length: PAR }, async () => {
   while (next < JOBS.length) {
     const j = JOBS[next++];
-    const r = await solve(j);
+    let r;
+    try { r = await solve(j); }
+    catch (e) { r = { key: j.key, clip: j.clip, ok: false, error: String(e.message || e) }; errors++; }
     out.push(r);
-    console.error(`${r.ok ? (r.loose ? 'LOOS' : r.manual ? 'man ' : 'ok  ') : 'FAIL'} ${j.key} ${j.clip} ${r.ok ? r.t + '  …' + r.prefix.slice(-35) + ' | ' + r.suffix.slice(0, 35) + '…' : ''}`);
+    const tag = r.error ? 'ERR ' : r.loose ? 'LOOS' : !r.ok ? 'FAIL' : r.manual ? 'man ' : 'ok  ';
+    console.error(`${tag} ${j.key} ${j.clip} ${r.error ? r.error : r.t !== undefined ? r.t + '  …' + r.prefix.slice(-35) + ' | ' + r.suffix.slice(0, 35) + '…' : ''}`);
   }
 }));
 out.sort((a, b) => a.key.localeCompare(b.key));
 writeFileSync(OUT, JSON.stringify(out, null, 1));
+if (errors) { console.error(`${errors} jobs failed on the endpoint — nothing was decided for them`); process.exit(1); }

@@ -16,7 +16,7 @@
 #   role 'canvas'/'win' -> V1, 'v2' -> the layer above it; every other role is ignored
 #   (the alternate takes and the B-roll library live past the end of the cut).
 # cards rows: {name, st, en, track} — track 0 full-frame on V1, 2 = overlay with alpha.
-import json, os, re, subprocess, sys, tempfile
+import hashlib, json, os, re, subprocess, sys, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 
@@ -71,10 +71,16 @@ print(f'{len(segs)} segments, {END - T0:.1f} s, {sum(1 for s in segs if not s["s
 
 def render(i_s):
     i, s = i_s
-    out = os.path.join(TMP, f'{i:04d}.mp4')
+    dur, src = s['b'] - s['a'], s['src']
+    # a segment that starts inside a piece (after a cutaway, a card, --from) plays the piece from
+    # there, not from its head
+    off = src['sIn'] + (s['a'] - src['a']) if src and not src['still'] else 0.0
+    # cached by what the segment shows, so a changed plan never reuses a stale render
+    key = json.dumps([round(dur, 3), src and src['path'], round(off, 3), src and src['still'],
+                      s['plate'] and s['plate']['path'], W, H, FPS])
+    out = os.path.join(TMP, hashlib.sha1(key.encode('utf-8')).hexdigest()[:16] + '.mp4')
     if os.path.exists(out) and os.path.getsize(out) > 1000:
         return out
-    dur, src = s['b'] - s['a'], s['src']
     vf = (f'scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,'
           f'fps={FPS},setsar=1,format=yuv420p')
     cmd = ['ffmpeg', '-v', 'error', '-y']
@@ -83,7 +89,7 @@ def render(i_s):
     elif src['still']:
         cmd += ['-loop', '1', '-t', f'{dur:.3f}', '-i', src['path']]
     else:
-        cmd += ['-ss', f'{src["sIn"]:.3f}', '-t', f'{dur:.3f}', '-i', src['path']]
+        cmd += ['-ss', f'{off:.3f}', '-t', f'{dur:.3f}', '-i', src['path']]
     if s['plate']:
         cmd += ['-i', s['plate']['path'], '-filter_complex',
                 f'[0:v]{vf}[v];[1:v]scale={W}:{H}[p];[v][p]overlay=0:0']
@@ -121,12 +127,13 @@ def loud_channel(path, at):
 CH = {}
 clips = []
 for r in sorted(speak, key=lambda x: x['ns']):
-    if not (T0 - 0.01 <= r['ns'] < END) or is_still(r):
+    if r['ne'] <= T0 or r['ns'] >= END or is_still(r):
         continue
     path = V[r['clip']]['path']
     if path not in CH:
         CH[path] = loud_channel(path, r['sIn'] + 1)
-    row = {'path': path, 'start': r['ns'] - T0, 'in': r['sIn'], 'out': r['sIn'] + (r['ne'] - r['ns'])}
+    cut = max(0.0, T0 - r['ns'])           # a piece already running at --from starts mid-piece
+    row = {'path': path, 'start': r['ns'] + cut - T0, 'in': r['sIn'] + cut, 'out': r['sIn'] + (r['ne'] - r['ns'])}
     if CH[path] is not None:
         row['ch'] = CH[path]
     clips.append(row)
@@ -134,7 +141,8 @@ one = sum(1 for v in CH.values() if v is not None)
 print(f'audio: {len(CH)} sources, {one} with the voice on one channel only')
 cj, wav = os.path.join(TMP, 'clips.json'), os.path.join(TMP, 'audio.wav')
 json.dump(clips, open(cj, 'w', encoding='utf-8'))
-subprocess.run(['node', 'scripts/mixdown.mjs', '--clips', cj, '--out', wav, '--sr', '48000'], check=True)
+subprocess.run(['node', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'mixdown.mjs'),
+                '--clips', cj, '--out', wav, '--sr', '48000'], check=True)
 
 cmd = ['ffmpeg', '-v', 'error', '-y', '-i', vid, '-i', wav]
 if SRT:                                   # ffmpeg's subtitles filter wants its own escaping

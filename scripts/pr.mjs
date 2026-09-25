@@ -4,6 +4,9 @@ import { callBridge } from './lib/prbridge.mjs';
 import { loadConfig } from './lib/config.mjs';
 
 function out(obj) { console.log(JSON.stringify(obj, null, 2)); }
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// The panel reports its timeouts in Russian («ExtendScript не ответил за …»).
+const isTimeout = (e) => /timeout|timed out|не ответил/i.test(String((e && e.message) || e));
 
 // The cache is a flat JSON map. Current panel builds key by sequenceID (a UUID);
 // older entries are keyed by a normalized sequence name (context-store.js:
@@ -82,15 +85,20 @@ async function main() {
       break;
     }
     case 'backup': {
+      // Clones the active sequence as «… [бэкап HH:MM:SS]» and REFOCUSES THE ORIGINAL: to work in a
+      // copy, clone and activate it yourself (SKILL.md, «Before touching anything»).
       const data = await callBridge('backupActiveSequence', []);
-      out(data); // { ok, seqName, seqId }
+      out(data); // { backupId, backupName, ... }
       break;
     }
     case 'transcribe': {
-      const snap = await callBridge('getTimelineSnapshot', []);
-      const seqName = snap && snap.sequenceName;
-      if (!seqName) { out({ ok: false, error: 'No active sequence' }); break; }
-      const res = readTranscriptForActiveSequence(seqName, snap && snap.sequenceId);
+      // --seq-id <id> / --seq-name <name> read another sequence's entry — the source's, when you
+      // work in a clone (a clone has a new sequenceID and no transcript of its own).
+      const byId = argVal(argv, '--seq-id'), byName = argVal(argv, '--seq-name');
+      const snap = byId || byName ? null : await callBridge('getTimelineSnapshot', []);
+      const seqName = byName || (snap && snap.sequenceName) || '';
+      if (!seqName && !byId) { out({ ok: false, error: 'No active sequence' }); break; }
+      const res = readTranscriptForActiveSequence(seqName, byId || (snap && snap.sequenceId));
       if (!res.found) {
         out({
           ok: false,
@@ -105,7 +113,7 @@ async function main() {
       break;
     }
     case 'cut': {
-      // payload: { ops: [ { type:"ripple_delete_interval", startSec, endSec }, ... ] }
+      // payload: { ops: [ { startSec, endSec, mode: "ripple" | "lift" }, ... ] }  (ORIGINAL coordinates)
       // flags: --force (override guard), --min-keep-sec <n> (default 2)
       const plan = readPayloadArg(argv);
       if (!plan || !Array.isArray(plan.ops)) throw new Error('cut payload needs { ops: [...] }');
@@ -140,39 +148,61 @@ async function main() {
             endSec: Number(o.endSec),
           })),
       };
-      const data = await callBridge('applyTimecodeEdits', [hostPlan], { timeoutMs: 130000 });
+      let data;
+      try {
+        data = await callBridge('applyTimecodeEdits', [hostPlan], { timeoutMs: 130000 });
+      } catch (e) {
+        if (!isTimeout(e)) throw e;
+        // The edit keeps running inside Premiere. Re-issuing it would cut twice: wait until the
+        // host answers a read again (ExtendScript is single-threaded, so the edit has finished by
+        // then) and compare the new end with the expected one.
+        console.error('cut: bridge timeout — the edit is still running in Premiere. NOT re-issuing; polling.');
+        const allRipple = plan.ops.every((o) => o.mode !== 'lift');
+        const want = seqEnd != null && allRipple ? +(seqEnd - check.removedSec).toFixed(3) : null;
+        for (let i = 0; i < 120 && !data; i++) {
+          await sleep(15000);
+          let s2;
+          try { s2 = await callBridge('getTimelineSnapshot', [], { timeoutMs: 40000 }); } catch { continue; }
+          const end = s2 && s2.sequenceEndSec;
+          data = { ok: want == null || Math.abs(end - want) < 0.1, recoveredAfterTimeout: true, sequenceEndSecAfter: end, expectedEndSec: want };
+        }
+        if (!data) { out({ ok: false, timeout: true, hint: 'Premiere is still busy after 30 min. Do NOT re-run the cut; check the timeline.' }); process.exit(1); }
+      }
       out({ ...data, sequenceEndSec: seqEnd, removedSec: check.removedSec, removedRatio: check.removedRatio, forced: force && !check.ok });
       break;
     }
     case 'markers': {
-      // payload: [ { startSec, name, comment, color }, ... ]
+      // payload: [ { timeSec, name, comment, color }, ... ] — the host key is timeSec (a row without
+      // it is skipped silently) and the host ignores color: run markercolors.mjs afterwards
       const markers = readPayloadArg(argv);
       if (!Array.isArray(markers)) throw new Error('markers payload must be an array');
-      const data = await callBridge('addSequenceMarkers', [markers], { timeoutMs: 60000 });
+      const data = await callBridge('addSequenceMarkers', [markers], { timeoutMs: 130000 });
       out(data); // { ok, count }
       break;
     }
     case 'reframe-sources': {
       const data = await callBridge('getVerticalReframeSources', []);
-      out(data); // { ok, clips:[{nodeId,name,startSec},...] }
+      out(data); // { ok, clips:[{trackIndex, clipIndex, name, mediaPath, startSec, endSec, inPointSec}, ...] }
       break;
     }
     case 'reframe': {
-      // payload: { clips: [ { nodeId, scalePercent, ... }, ... ] }
+      // payload: { newName, targetW, targetH, expectedSequenceName,
+      //            items: [ { trackIndex, clipIndex, scalePct, posX, posY }, ... ] }  (build with vframe.mjs)
+      // CLONES the active sequence into a vertical one; trim the clone with `cut` afterwards.
       const plan = readPayloadArg(argv);
       const data = await callBridge('applyVerticalReframe', [plan], { timeoutMs: 130000 });
       out(data);
       break;
     }
     case 'overlay': {
-      // payload: { filePath, startSec, ... }
+      // payload: { filePath, expectedSequenceName, startSec } — both of the first two are required
       const payload = readPayloadArg(argv);
       const data = await callBridge('importAndOverlayOnTop', [payload], { timeoutMs: 130000 });
       out(data);
       break;
     }
     case 'import': {
-      // payload: { filePath, binName? }
+      // payload: { path, binName? } — the key is `path` here (overlay uses `filePath`)
       const payload = readPayloadArg(argv);
       const data = await callBridge('importMediaFile', [payload], { timeoutMs: 130000 });
       out(data);
@@ -190,7 +220,7 @@ async function main() {
       break;
     }
     default:
-      console.error('Usage: pr.mjs <snapshot|backup|transcribe|cut|markers|reframe-sources|reframe|overlay|import|activate>');
+      console.error('Usage: pr.mjs <snapshot|backup|transcribe [--seq-id <id>|--seq-name <name>]|cut|markers|reframe-sources|reframe|overlay|import|activate> [--file <payload.json> | --json <payload>]');
       process.exit(2);
   }
 }

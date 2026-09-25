@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// Is the live Premiere reachable?  `node scripts/preflight.mjs [--gen]`
+//   ready     the «ИИ: монтаж» panel answers on the CDP port: everything an edit needs.
+//   --gen     also the Phygital sidecar and its login, needed only by gen.mjs (paid generation):
+//             starts the sidecar if it is down and reports genReady. An expired login is renewed
+//             by the user: `python -m scripts.cli auth login` in Phygital-Adobe-Studio/sidecar.
+// Exit code 0 when ready (and genReady with --gen).
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { evalInPanel } from './lib/cdp.mjs';
@@ -52,6 +58,17 @@ function startSidecar() {
 
 async function main() {
   const panel = await checkPanel();
+  if (!process.argv.includes('--gen')) {
+    const report = {
+      panel: panel.ok ? 'ready' : 'MISSING — open Premiere and the "ИИ: монтаж" panel',
+      panelDetail: panel.detail,
+      ready: panel.ok,
+      generation: 'not checked — run with --gen before paid generation (gen.mjs)',
+    };
+    console.log(JSON.stringify(report, null, 2));
+    process.exitCode = report.ready ? 0 : 1;
+    return;
+  }
   let sidecar = await checkSidecar();
 
   if (!sidecar.ok) {
@@ -68,7 +85,7 @@ async function main() {
 
   let authMsg;
   if (authReady) authMsg = 'ready';
-  else if (!sessionReady) authMsg = 'NO SESSION — Phygital session expired. Re-run recon: python -m scripts.cli auth login';
+  else if (!sessionReady) authMsg = 'NO SESSION — Phygital session expired. The user re-runs recon: python -m scripts.cli auth login (in Phygital-Adobe-Studio/sidecar)';
   else authMsg = 'TOKEN WALL — ' + authWall.detail;
 
   const report = {
@@ -78,12 +95,13 @@ async function main() {
     sidecarDetail: sidecar.detail || sidecar.startError,
     auth: authMsg,
     authWallDetail: authWall.detail,
-    ready: panel.ok && sidecar.ok && authReady,
+    ready: panel.ok,
+    genReady: panel.ok && sidecar.ok && authReady,
   };
   console.log(JSON.stringify(report, null, 2));
   // Set exitCode and let Node drain the loop naturally. Calling process.exit()
   // here force-closes undici/WebSocket handles mid-teardown and trips a libuv
   // UV_HANDLE_CLOSING assertion on Windows (exit 127 despite a good report).
-  process.exitCode = report.ready ? 0 : 1;
+  process.exitCode = report.genReady ? 0 : 1;
 }
 main().catch((e) => { console.error('ERROR:', e.message); process.exitCode = 1; });

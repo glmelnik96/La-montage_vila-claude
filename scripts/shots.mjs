@@ -84,5 +84,5 @@ if (process.argv[1] && process.argv[1].endsWith('shots.mjs')) {
   const times = picked.map(c => (c.src + c.srcEnd) / 2);
   const png = sheet(src, times, arg('out', 'gen-out/frames/shots'), +arg('grid', 10));
   console.log(`${r.name}  ${r.w}x${r.h}  ${r.n} clips -> ${png}`);
-  picked.forEach((c, n) => console.log(`  ${String(n).padStart(3)}  clip ${c.i}  src ${c.src}..${c.srcEnd}  mid ${times[n].toFixed(2)}`));
+  picked.forEach((c, n) => console.log(`  ${String(n).padStart(3)}  clip ${c.i}  tl ${c.tl}..${c.tlEnd}  src ${c.src}..${c.srcEnd}  mid ${times[n].toFixed(2)}`));
 }

@@ -147,7 +147,7 @@ Clone the master, ripple-delete everything outside `[start, end]`, then reframe.
 The master is never edited.
 
 Ripple-deleting the head and tail of a 1200-clip sequence takes several minutes
-and **will exceed the bridge timeout**. See "Bridge timeouts" in SKILL.md — poll,
+and **will exceed the bridge timeout**. See «Host scripting» in SKILL.md — poll,
 never re-issue. After the cut, assert the surviving source range matches your
 intended `[start, end]` before applying Motion to anything.
 

@@ -53,7 +53,9 @@ for (let pass = 1; pass <= 200; pass++) {
     const raw = await callBridge('evalJson', [code(from)], { timeoutMs: 30000 });
     r = typeof raw === 'string' ? JSON.parse(raw) : raw;
   } catch (e) {
-    if (isTimeout(e)) { console.error('  bridge timeout, re-checking'); await pause(8000); continue; }
+    // The timed-out window may or may not have finished. It is sent again: a second copy of the
+    // effect is harmless (L := R twice), a clip left without it plays out of one speaker.
+    if (isTimeout(e)) { console.error('  bridge timeout — sending the same window again (a double copy is harmless)'); await pause(8000); continue; }
     throw e;
   }
   if (r.error) { console.error(JSON.stringify(r)); process.exit(2); }

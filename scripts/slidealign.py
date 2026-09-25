@@ -12,9 +12,10 @@ way to find the boundary the speaker actually crossed.
         --tr gen-out/slides/tr5.json --out gen-out/slides/m5_align.md \
         [--min-run 8] [--chars 700]
 
-Runs shorter than --min-run seconds are folded into the neighbouring run: a
-one-second blip is a page turn caught mid-animation, not a block. Output is
-markdown, meant to be READ, not parsed.
+Runs shorter than --min-run seconds are dropped, and neighbours that then show the
+same page are joined: a one-second blip is a page turn caught mid-animation, not a
+block. The transcript under a dropped run is not printed (read it with trwin.py).
+Output is markdown, meant to be READ, not parsed.
 """
 import argparse
 import io

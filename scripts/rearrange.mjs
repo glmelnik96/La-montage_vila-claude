@@ -32,8 +32,10 @@
 // step after a bridge timeout is safe (re-running a relative move is not, which
 // is why nothing here is "move by X" without checking where the clip is first).
 //
-// TrackItem.move() takes a signed delta and drags the linked A/V partner along;
-// `test-move` proves that on the live sequence before anything real happens.
+// TrackItem.move() takes a signed delta and moves ONLY the item it is called on: on
+// Premiere 26.3 the linked A/V partner stays behind (the panel's own comment claims
+// otherwise), so every video and audio piece is moved explicitly. `test-move` shows
+// what this build does on the live sequence before anything real happens.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { callBridge } from './lib/prbridge.mjs';
 

@@ -5,64 +5,72 @@ Codex, Copilot). Read this first.
 
 ## What this repo is
 
-`premiere-autopilot` — tooling that drives a **live, already-open Adobe Premiere Pro**
-through the LLM-Chat_Pr CEP panel over CDP port 8098. It does not render or export
-video itself; it makes editorial decisions and applies them to the running app.
+`premiere-autopilot` is tooling that drives a **live, already-open Adobe Premiere Pro**
+through the LLM-Chat_Pr CEP panel over CDP port 8098. It makes editorial decisions, applies
+them to the running app, and checks the result by rendering frames and audio.
 
-**Start by reading [`SKILL.md`](SKILL.md).** It holds the workflows, the CLI payload
-contracts and the non-obvious constraints. `references/vertical-reels.md` has the
-multicam→vertical-reel technique in full.
+**Start by reading [`SKILL.md`](SKILL.md).** It holds:
+- the workflows, A–I;
+- the rules by topic;
+- the payload contracts.
+
+Each workflow names the `references/*.md` file with its full technique. Read only the one the
+task needs.
 
 ## Non-negotiables
 
-1. **Every operation mutates the user's live project.** There is no dry run and no
-   undo stack you control. Take a backup (`node scripts/pr.mjs backup`, record the
-   returned `backupId`) before the first mutating call, and confirm with the user
-   before anything destructive.
-2. **Check which project is focused first.** `app.project` is whatever Premiere has
-   focused right now. If several projects are open, ask the user to close the others
-   rather than guessing which one they meant.
-3. **Work in duplicates. Never edit the source sequence.** Clone it, edit the clone,
-   leave the original as the backup.
-4. **`gen-out/` is gitignored scratch.** Whatever you find there belongs to a previous
-   session on a different project. It is evidence, not method — never build a plan on
-   it and never assume it will exist.
-5. **A bridge timeout is not a failure.** The edit keeps running inside Premiere after
-   the call gives up. Poll for the result; re-issuing applies the edit twice.
-6. **Verify on pixels, not on numbers.** The panel cannot return a rendered frame, so
-   re-derive every visual claim from the source media with ffmpeg and look at it.
-7. **Confirm before removing anything.** Deleting intermediate `_wip` sequences,
-   restoring a backup over current work or clearing a bin are destructive, and none of
-   them are implied by a request to produce an edit. Leave intermediates and ask.
+1. **Every operation mutates the user's live project.** There is no dry run and no undo stack
+   you control. Take a backup (`node scripts/pr.mjs backup`, record the `backupId`) before the
+   first mutating call, and confirm with the user before anything destructive.
+2. **Check which project is focused first.** `app.project` is whatever Premiere has focused
+   right now. If several projects are open, ask the user to close the others rather than
+   guessing which one they meant.
+3. **Work in duplicates. Never edit the source sequence.** Clone it, edit the clone, and leave
+   the original as the backup. Note that `pr.mjs backup` refocuses the original.
+4. **Two folders are gitignored:**
+   - `gen-out/` is scratch from other sessions and other projects. Treat it as evidence, never
+     as method.
+   - `projects/` holds local notes, one per client project, and is never pushed. Read
+     `projects/INDEX.md`, then only the note of the project in front of you.
+5. **A bridge timeout is not a failure.** The edit keeps running inside Premiere. Poll a cheap
+   read until the host answers; re-issuing applies the edit twice.
+6. **Verify on pixels and by ear, not on numbers.** Render frames and audio from the sequence
+   (SKILL.md, «Rendering and looking»), crop the source for reframes, and look at the timeline
+   panel.
+7. **Confirm before removing anything.** Deleting intermediate `_wip` sequences, restoring a
+   backup over current work and clearing a bin are all destructive. None of them is implied by
+   a request to produce an edit. Leave intermediates and ask.
 8. **Do not commit without the user asking.** Do not edit the two upstream source repos.
 
 ## Environment
 
-- Node ≥ 18, `ffmpeg` and `ffprobe` on PATH. No install step; there are no dependencies.
-- `node scripts/preflight.mjs` — run it first; do not proceed unless `ready:true`.
-- Shell is bash (Windows). Use forward slashes and quote paths containing spaces or
+- Node ≥ 22: `scripts/lib/cdp.mjs` uses the global `WebSocket`. There are no npm
+  dependencies.
+- `ffmpeg` and `ffprobe` on PATH.
+- Python 3 for the `.py` tools:
+  - numpy and Pillow;
+  - PyMuPDF for decks;
+  - faster-whisper for local transcription.
+- `node scripts/preflight.mjs`: `ready:true` means the panel answers, which is all an edit
+  needs. `--gen` also checks the Phygital sidecar, which only paid generation uses.
+- The shell is bash on Windows. Use forward slashes, and quote paths that contain spaces or
   Cyrillic.
 
 ## Tools
 
-| Command | Purpose |
-|---|---|
-| `scripts/preflight.mjs` | Check panel + auth are live |
-| `scripts/pr.mjs` | `snapshot backup transcribe cut markers reframe overlay import activate` |
-| `scripts/audio.mjs` | RMS envelope / pause detection / cut-boundary check |
-| `scripts/shots.mjs` | Contact sheet of the active sequence's shots; crop probe |
-| `scripts/vframe.mjs` | 9:16 reframe arithmetic and plan builder |
-| `scripts/checkreframe.mjs` | Invert stored Motion values back to pixels and tile them |
-| `scripts/gen.mjs` | Paid generation — always `--dry-run` and confirm first |
-| `scripts/cloudtr.mjs` | Cloud transcription split at the clip's own pauses (no dropped windows, cuttable edges) |
-| `scripts/cloudsplit.mjs` | Find a cut inside a phrase: the pause after a given word, by cloud-transcribed prefixes |
-| `scripts/cloudedges.mjs` | Read the head and tail of every piece back through the cloud model |
-| `scripts/mogrtcard.py` | Editable title cards: one .mogrt per card from Premiere's Basic Title |
-| `scripts/_ev.mjs` | Evaluate ExtendScript in the Premiere host |
-| `scripts/_pev.mjs` | Evaluate JS in the panel's DOM context |
+Every script's header comment documents its flags. SKILL.md says which workflow uses which.
+- **Premiere:** `pr.mjs` (snapshot, backup, transcribe, cut, markers, reframe, import,
+  overlay, activate), `_ev.mjs` (host JSX from a file), `_pev.mjs` (JS in the panel).
+- **Timeline:** `assemble`, `rearrange`, `ripplecut`, `placestills`, `trackorder`,
+  `markercolors`, `fillmono`, `blockcut`.
+- **Audio and transcription:** `audio`, `scan`, `mixdown`, `transcribe_local.py`,
+  `transcribe_mixed.py`, `rewin.py`, `splicecheck.py`, `cloudtr`, `cloudsplit`, `cloudedges`,
+  `subcues`.
+- **Picture:** `shots`, `vframe`, `checkreframe`, `planpreview.py`, `prwindow.ps1`, and the
+  slide tools (`slidetrack.py`, `slidealign.py`, `planverify.py`, …).
+- **Generation (paid):** `gen.mjs`. Always run it with `--dry-run` first and get the user's
+  yes.
 
-`scripts/_ev.mjs` runs **ES3**. No arrow functions, no `let`/`const`, no template
-literals, no `Array.prototype.find`/`forEach`/`map` — use plain `for` loops. And
-`short`, `int`, `class`, `enum`, `char` and friends are reserved words that cannot appear
-even as object-literal keys. All of these fail at parse time with an opaque
-`EvalScript error`, with no line number, that `try/catch` cannot intercept.
+Host code is **ES3** (SKILL.md, «Host scripting»). Arrow functions, `let`/`const`, template
+literals, `Array.prototype.forEach`/`map`/`find`, and reserved words used as keys all fail at
+parse time with an opaque `EvalScript error` that `try/catch` cannot intercept.

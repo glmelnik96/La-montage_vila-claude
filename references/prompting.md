@@ -1,7 +1,7 @@
 # Prompting reference (gen.mjs)
 
 Guidance for writing prompts for the Phygital sidecar generators. Load this in
-workflow step 8 before any paid generation. Fill the **slots**, drop empty ones,
+Workflow A step 7 before any paid generation. Fill the **slots**, drop empty ones,
 and keep prompts concrete — name what is in frame, not adjectives about quality.
 
 ## Node map (defaults in `gen.mjs`)

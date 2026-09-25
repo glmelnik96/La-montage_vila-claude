@@ -13,8 +13,9 @@ Verified against extension:
 
 1. **addSequenceMarkers** — host reads `timeSec` per row (jsx ~line 2063:
    `if (typeof m.timeSec !== 'number') continue;`). A payload keyed on `startSec`
-   produces `count:0` with `ok:true` — a silent no-op, no error. Also honors
-   `name`, `comment`, `color`.
+   produces `count:0` with `ok:true`, a silent no-op with no error. It honours `name` and
+   `comment`. It ignores `color`: on host 2.17.0 all 83 markers of one job landed green.
+   Colour them afterwards with `scripts/markercolors.mjs`.
 
 2. **applyVerticalReframe** — host expects
    `{ newName, targetW, targetH, expectedSequenceName, items:[{trackIndex, clipIndex, scalePct, posX, posY}] }`.
@@ -63,6 +64,16 @@ do everything the built-in methods don't expose — **without editing the source
 Helper: `scripts/_ev.mjs <file.jsx>` runs a host JSX file; `scripts/_pev.mjs <file.js>`
 evals JS in the PANEL (DOM) context, used to click `#btn-transcribe` and read `#err`.
 
+The panel's signature is `evalJson(expr, callback, opts)`. `opts.mutating` turns off its
+cold-start retry, which re-runs a script that answered `EvalScript error.`, `undefined` or
+`''` up to three times. It also raises the timeout from 30 s to 120 s. `opts.timeoutMs` sets
+the timeout outright. `scripts/lib/prbridge.mjs` passes `{mutating: true, timeoutMs}` unless
+told `{mutating: false}`.
+
+Before 2026-09-25 it appended its callback after the arguments, so opts could never reach the
+panel. Every script then ran with a hard 30 s cap and the triple retry. This was verified live
+with a scratch counter.
+
 Things that REQUIRE this escape hatch (the built-ins can't do them):
 
 - **Colored markers.** `addSequenceMarkers` ignores color. Use
@@ -72,7 +83,8 @@ Things that REQUIRE this escape hatch (the built-ins can't do them):
   duration only. To control it: `track.overwriteClip(projectItem, startSec)`, then take
   `track.clips[track.clips.numItems-1]` and set `var t=clip.end; t.seconds=endSec; clip.end=t;`.
 - **Adding a video track.** `seq.videoTracks.addTracks(1)` works directly (QE
-  `qe.project.getActiveSequence().addTracks(...)` is the fallback). Needed because a cloned
+  `qe.project.getActiveSequence().addTracks(...)` is the fallback). On Premiere 26.3.2
+  (2026-09-25) `seq.videoTracks.addTracks` is `undefined`; only the QE call exists. Needed because a cloned
   sequence inherits the source's track count — a 1-video-track source clones to
   `numVideo:1`, making `seq.videoTracks[1]` **null** ("null is not an object" on placement).
 - **Clone to a working duplicate.** `seq.clone()` returns nothing useful — diff
@@ -89,11 +101,14 @@ Things that REQUIRE this escape hatch (the built-ins can't do them):
 
 ## Not available (don't try)
 
-- **Frame export.** `seq.exportFramePNG` and `seq.exportFrameJPEG` do not exist on the
-  Sequence object — both throw "is not a function". There is no way to get a rendered
-  composite out of the host. For visual validation, reconstruct what the viewer sees from
-  the SOURCE assets instead (ffmpeg crop simulation for reels; reading the slide PNG
-  directly for full-frame deck overlays).
+- **Frame export on the DOM `Sequence`.** `seq.exportFramePNG` and `seq.exportFrameJPEG` do
+  not exist there; both throw "is not a function". Rendered frames do come out of the host
+  by two other routes:
+  - QE `qe.project.getActiveSequence().exportFramePNG(tc, new File(p).fsName)`, which is
+    wrong past one hour;
+  - `sequence.exportAsMediaDirect` with the JPEG preset over a one-frame In/Out, which works
+    at any time.
+  See SKILL.md «Rendering and looking».
 
 ## Transcript cache
 

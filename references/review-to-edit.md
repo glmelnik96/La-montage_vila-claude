@@ -91,6 +91,9 @@ distance from the stamped boundary and never searched further than 0.8 s away �
 a wider window finds breaths and laughter seconds off. Then hear every edge in a
 3-second window with word times (a fresh transcription of just that window is far
 more precise than the long-file pass) and pin the blades that are still wrong.
+No repo tool scores pauses this way. `audio.mjs snap` and `snapplan.mjs` take the LONGEST
+pause within ±6 s. List the candidates with `audio.mjs pauses --src <mix> --at <t>
+--span 1` and choose by hand.
 
 ## 5. Rebuild with absolute targets — `scripts/rearrange.mjs`
 
@@ -107,10 +110,12 @@ more precise than the long-file pass) and pin the blades that are still wrong.
 > five-effect audio chain on every A1 clip).
 
 Ripple deletes and insert edits are the wrong tool when a second video track has
-content downstream: the host's ripple delete removes the pieces under the range
-track by track, so a track with nothing under the range is not shifted and the
-screen recording on V2 drifts out of sync with the camera. `rearrange.mjs` instead
-razors every track, lifts, and moves every piece to an absolute target:
+content downstream. The host's ripple delete removes the pieces under the range track by
+track. On that job a track with nothing under the range was not shifted, so the screen
+recording on V2 drifted out of sync with the camera. On 2026-09-25, with host 2.17.0,
+`pr.mjs cut` did shift empty V2/V3, and the conditions of the first case are unknown: check
+every track after any ripple. `rearrange.mjs` instead razors every track, lifts, and moves
+every piece to an absolute target:
 
 - `plan.json`: `razor` times, `lift` ranges, `map` of `{a, b, ns}` (a piece starting
   in `[a, b)` goes to `ns + start − a`). A 3 s gap is an offset in `ns`; moving a
@@ -180,8 +185,9 @@ Then compare every episode with its range of the full edit, item for item.
 - QE `exportFramePNG(timecode, path)` needs a **native** path — build it in JSX
   with `new File('C:/…/name').fsName`; a forward-slash path throws "Unknown error
   exception". Premiere appends `.png`.
-- **Frames at ≥ 1 hour come back from the head of the sequence** (both the
-  `01;01;40;00` string and the CTI's own timecode). Verify late frames in the
+- **QE frames at ≥ 1 hour come back from the head of the sequence** (both the
+  `01;01;40;00` string and the CTI's own timecode). For a late frame, render a one-frame
+  In/Out with the JPEG preset (SKILL.md «Rendering and looking»), or look in the
   per-episode sequences, which are all shorter than an hour.
 - The first export after a big rearrange may render a BRAW layer black; export via
   the playhead (`setPlayerPosition`, then `qe…CTI.timecode`) and compare.
@@ -200,13 +206,14 @@ Then compare every episode with its range of the full edit, item for item.
 fragments) cover the step before a draft: marking restarts and long pauses in a
 single long take.
 
-- **Verbatim restarts:** `findRetakes` seeds on exact 5-grams and extends each seed
+- **Verbatim restarts:** `findRetakes` seeds on exact n-grams (6 by default) and extends each seed
   along its diagonal, so a restarted paragraph shows up as one long run repeated
   seconds to minutes later. A lecture repeats its own terms all the time; only long
   runs count.
-- **Reworded restarts:** `fuzzyRetakes` tests every long pause — does what follows
+- **Reworded restarts:** `fuzzyRetakes` tests every long pause: does what follows
   restate what was said shortly before? It scores containment of content words,
-  not Jaccard, because the second take is usually the shorter one.
+  not Jaccard, because the second take is usually the shorter one. It is exported
+  for import only; the command line runs `findRetakes`.
 - **Re-transcribe every Whisper mega-segment (> 8 s) first.** The panel's transcript
   folded a stumble-and-restart into one clean sentence; the retake was invisible
   until that window was transcribed again.

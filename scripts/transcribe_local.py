@@ -3,7 +3,10 @@
 # instead of a segment time that drifts by seconds.
 #
 #   python scripts/transcribe_local.py <audio> <out_prefix> [--model large-v3]
-#          [--lang ru] [--hotwords "..."] [--seq-id ID --seq-name NAME]
+#          [--lang ru] [--device auto|cuda|cpu] [--hotwords "..."] [--seq-id ID --seq-name NAME]
+#
+# --device cpu when another program holds the GPU (ComfyUI and the like): large-v3 still runs,
+# much slower. auto takes the GPU whenever one exists, even a full one.
 #
 # Writes <out_prefix>.words.json / .segments.json / .srt / .txt, and with
 # --seq-id also <out_prefix>.omc.json in the panel's transcript format.
@@ -34,10 +37,14 @@ ap = argparse.ArgumentParser()
 ap.add_argument('audio'); ap.add_argument('out')
 ap.add_argument('--model', default='large-v3'); ap.add_argument('--lang', default='ru')
 ap.add_argument('--hotwords', default=None)
+ap.add_argument('--device', default='auto', choices=['auto', 'cuda', 'cpu'])
 ap.add_argument('--seq-id', default=None); ap.add_argument('--seq-name', default='')
 a = ap.parse_args()
+os.makedirs(os.path.dirname(os.path.abspath(a.out)), exist_ok=True)
+if a.hotwords:
+    print('WARNING: --hotwords silently halved the output of a 63-min recording; compare words per minute', file=sys.stderr)
 
-dev = 'cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu'
+dev = a.device if a.device != 'auto' else ('cuda' if ctranslate2.get_cuda_device_count() > 0 else 'cpu')
 try:
     model = WhisperModel(a.model, device=dev, compute_type='float16' if dev == 'cuda' else 'int8')
 except Exception as e:

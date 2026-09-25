@@ -87,8 +87,8 @@ def templates(pages, prect, scale=2):
 def frames(src, fps, frect):
     fw, fh, fx, fy = frect
     p = subprocess.Popen(
-        ['ffmpeg', '-v', 'error', '-i', src, '-vf',
-         f'crop={fw}:{fh}:{fx}:{fy},fps={fps},scale={CW}:{CH}',
+        ['ffmpeg', '-v', 'error', '-i', src, '-vf',     # views are in 1920x1080 space: normalise first
+         f'scale={SRCW}:{SRCH},crop={fw}:{fh}:{fx}:{fy},fps={fps},scale={CW}:{CH}',
          '-pix_fmt', 'gray', '-f', 'rawvideo', '-'],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     size, chunk = CW * CH, 512
@@ -106,7 +106,8 @@ def frames(src, fps, frect):
 
 def grab(src, t):
     o = subprocess.run(['ffmpeg', '-v', 'error', '-ss', f'{t:.2f}', '-i', src, '-frames:v', '1',
-                        '-pix_fmt', 'gray', '-f', 'rawvideo', '-'], capture_output=True).stdout
+                        '-vf', f'scale={SRCW}:{SRCH}', '-pix_fmt', 'gray', '-f', 'rawvideo', '-'],
+                       capture_output=True).stdout
     if len(o) < SRCW * SRCH:
         return None
     return Image.frombytes('L', (SRCW, SRCH), o[:SRCW * SRCH])

@@ -36,6 +36,16 @@ const only = arg('only') ? new Set(String(arg('only')).split(',').map(Number)) :
 const dry = has('dry-run');
 const markersOnly = has('markers-only');
 const log = (...a) => console.log(...a);
+const isTimeout = (e) => /timeout|timed out|не ответил/i.test(String((e && e.message) || e));
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// A read after a long ripple queues behind the edit and can time out itself: wait for the host.
+async function snapshotWhenFree() {
+  for (let i = 0; i < 120; i++) {
+    try { return await callBridge('getTimelineSnapshot', [], { timeoutMs: 40000 }); }
+    catch (e) { if (!isTimeout(e)) throw e; log('    (host still busy, waiting)'); await sleep(15000); }
+  }
+  throw new Error('host busy for 30 min');
+}
 
 // Everything the clone must lose: the gaps between keep-intervals, plus the head
 // and the tail.
@@ -83,8 +93,10 @@ async function run() {
       continue;
     }
 
+    // a re-run must not clone a block twice: an existing sequence of that name is left alone
     const jsx = `(function(){try{
       var seqs=app.project.sequences,src=null,i,j,k;
+      for(i=0;i<seqs.numSequences;i++){if(String(seqs[i].name)===${JSON.stringify(name)})return JSON.stringify({ok:false,exists:true});}
       for(i=0;i<seqs.numSequences;i++){if(String(seqs[i].sequenceID)===${JSON.stringify(plan.sequenceId)}){src=seqs[i];break;}}
       if(!src)return JSON.stringify({ok:false,error:'source not found'});
       var before={};
@@ -99,6 +111,7 @@ async function run() {
     }catch(e){return JSON.stringify({ok:false,error:String(e)});}})()`;
 
     const made = await callBridge('evalJson', [jsx], { timeoutMs: 120000 });
+    if (made && made.exists) { log('    exists — skipped (rename or delete it to rebuild this block)'); continue; }
     if (!made || !made.ok) { log('    CLONE FAILED', JSON.stringify(made)); continue; }
     log(`    clone ${made.id}`);
 
@@ -113,10 +126,11 @@ async function run() {
     try {
       res = await callBridge('applyTimecodeEdits', [hostPlan], { timeoutMs: 130000 });
     } catch (e) {
+      if (!isTimeout(e)) throw e;
       log('    (bridge timeout — edit still running, verifying by length)');
       res = null;
     }
-    const after = await callBridge('getTimelineSnapshot', []);
+    const after = await snapshotWhenFree();
     const gotSec = after && after.sequenceEndSec;
     const drift = gotSec != null ? gotSec - kept : null;
     log(`    cut -> ${gotSec}s (expected ${kept.toFixed(1)}s, drift ${drift?.toFixed(2)}s)` +
@@ -144,4 +158,5 @@ const activateByName = (name) => `(function(){try{
   return JSON.stringify({ok:false,error:'not found'});
 }catch(e){return JSON.stringify({ok:false,error:String(e)});}})()`;
 
-run().catch((e) => { console.error('ERROR:', e.message); process.exit(1); });
+run().then(() => { if (!dry) log('\nThe host ignores marker colour: run markercolors.mjs on the СПОРНО markers.'); })
+  .catch((e) => { console.error('ERROR:', e.message); process.exit(1); });

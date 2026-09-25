@@ -78,9 +78,10 @@ silently halves every score. `Image.BOX` / ffmpeg's `scale` do the right thing.
     python scripts/slidealign.py --track m7.json --deck-json decks.json --module 7 \
         --tr tr7.json --out m7_align.md --min-run 8
 
-Runs shorter than `--min-run` are folded into the neighbour: a one-second blip is a
-page turn caught mid-animation, not a block. The output is markdown, meant to be
-READ, not parsed.
+Runs shorter than `--min-run` are dropped, and neighbours that then show the same page are
+joined: a one-second blip is a page turn caught mid-animation, not a block. The transcript
+under a dropped run is not printed. When a boundary sits near one, read it with
+`trwin.py`. The output is markdown, meant to be READ, not parsed.
 
 Where the align doc says НЕТ СЛАЙДА for twenty minutes, the boundary exists only in
 what is being SAID. Dump the window and find the sentence:
@@ -141,7 +142,15 @@ Read the sheet in row-sized crops; 25 cells at once is unreadable.
 
 ## 6. Snap every boundary to a pause
 
-    node scripts/snapplan.mjs --plan m7_plan.json
+    node scripts/snapplan.mjs --plan m7_plan.json --thresh -50
+
+Take `--thresh` from the recording's level histogram. The default −40 marks quiet syllables
+as pauses on some material. The plan's `sequenceEndSec` is the file end; without it the
+last boundary is never snapped.
+
+Two edges snapped independently can land on the same pause or cross: a short block, a short
+dropped stumble. The snapper then prints CONFLICT, leaves both edges where the plan had
+them, and exits 1: pin them by hand.
 
 Adjacent blocks SHARE a boundary, so each distinct time is snapped once and written
 back everywhere it appears — otherwise a snapped end and an unsnapped start open a
@@ -181,6 +190,10 @@ Two things that will bite if changed: ripple deletes are applied HIGHEST-FIRST, 
 marker times are given in SOURCE time in the plan but must be written in the clone's
 time (source time minus everything removed before them).
 
+A re-run skips every block whose sequence already exists, so rename or delete a block to
+rebuild it. The host lands the СПОРНО markers green whatever `color` says: colour them
+afterwards with `markercolors.mjs`.
+
 A ~2 h module takes a few minutes per block; the bridge times out at 120 s while the
 edit keeps running, so `blockcut` re-reads the sequence length to find out what
 actually happened. Run it in the background and check the log.
@@ -197,8 +210,8 @@ out points, so a 40 s block still carries `out = 8811 s` — and some sources ca
 the unset sentinel `in = -400000`. Nothing in the timeline looks wrong and the
 collapsed-range check passes, but every export and every work-area operation then
 runs over two hours of nothing. Per block sequence: `setInPoint(0)` and
-`setOutPoint(Number(seq.end) / 254016000000)`. Batch it by module — `evalJson`
-gives up at 30 s.
+`setOutPoint(Number(seq.end) / 254016000000)`. Batch it by module: `evalJson`
+gives up at its timeout (120 s by default).
 
 That proves the ripple delete removed what it was told to. It says nothing about
 whether what it was told to remove was right. Three more checks, cheapest first,
