@@ -18,6 +18,7 @@ the Phygital sidecar.
 | G | Cameras + a separate recorder → one synced stack | `references/multicam-sync.md` |
 | H | Documentary canvas: interview pieces, B-roll, graphics, subtitles | SKILL.md |
 | I | After Effects graphics over an edit: plan → preview → AE build → Dynamic Link → check | `references/gfx-plan.md` |
+| J | Grading in DaVinci: XML of the used V1 fragments → graded renders back on V1 | `references/grade-roundtrip.md` |
 
 Where to read more:
 - [`SKILL.md`](SKILL.md): the skill itself, with the workflows, the rules by topic and the

@@ -10,7 +10,7 @@ through the LLM-Chat_Pr CEP panel over CDP port 8098. It makes editorial decisio
 them to the running app, and checks the result by rendering frames and audio.
 
 **Start by reading [`SKILL.md`](SKILL.md).** It holds:
-- the workflows, A–I;
+- the workflows, A–J;
 - the rules by topic;
 - the payload contracts.
 
@@ -61,7 +61,8 @@ task needs.
 Every script's header comment documents its flags. SKILL.md says which workflow uses which.
 - **Premiere:** `pr.mjs` (snapshot, backup, transcribe, cut, markers, reframe, import,
   overlay, activate), `_ev.mjs` (host JSX from a file), `_pev.mjs` (JS in the panel).
-- **Timeline:** `assemble`, `rearrange`, `ripplecut`, `placestills`, `trackorder`,
+- **Timeline:** `seqdump` (read-only dump), `gridfix` (snap edges to the frame grid), `assemble`,
+  `rearrange`, `ripplecut`, `placestills`, `trackorder`,
   `markercolors`, `fillmono`, `blockcut`.
 - **Audio and transcription:** `audio`, `scan`, `mixdown`, `transcribe_local.py`,
   `transcribe_mixed.py`, `rewin.py`, `splicecheck.py`, `cloudtr`, `cloudsplit`, `cloudedges`,
@@ -70,6 +71,9 @@ Every script's header comment documents its flags. SKILL.md says which workflow 
   slide tools (`slidetrack.py`, `slidealign.py`, `planverify.py`, …).
 - **Generation (paid):** `gen.mjs`. Always run it with `--dry-run` first and get the user's
   yes.
+- **Grading in DaVinci, Workflow J, `references/grade-roundtrip.md`:** `gradexml` (the grading
+  timeline and its FCP XML), `gradexmlcheck.py`, `gradesub` (graded renders back onto V1),
+  `tlexport` + `gradeverify.py` (frame-exact check on Rec.709 code values).
 - **Graphics (AE), Workflow I, `references/gfx-plan.md`:**
   - `propen.mjs`: opens a project with no clicks from the user;
   - `gfxexport.mjs`: writes the plate, `edit.json` and `words.json`;

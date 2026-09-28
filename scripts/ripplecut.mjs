@@ -43,7 +43,15 @@ function clips(){ var o=[],i,j,t,c;
     o.push({k:'a',tr:i,c:c,st:c.start.seconds,en:c.end.seconds,id:String(c.nodeId)});}}
   return o; }
 function index(){ var o=clips(),m={},i; for(i=0;i<o.length;i++) m[o[i].id]=o[i]; return m; }
-function tm(x){var t=new Time();t.seconds=x;return t;}
+// Every Time is built in whole frames of ticks. A Time from seconds rounds, and moves by a
+// seconds delta left items 1 tick past the frame grid: invisible in every DOM read, yet the
+// frame at such an edge showed the previous item (a slide switch one frame late), and material
+// overwritten on the grid later left 1-tick slivers behind. Moves go to absolute targets, so an
+// item that was off the grid lands back on it.
+var TPF=Number(s.getSettings().videoFrameRate.ticks);
+function tk(x){ return Math.round(x*254016000000/TPF)*TPF; }
+function tm(x){var t=new Time();t.ticks=String(tk(x));return t;}
+function moveTo(c,x){var d=new Time();d.ticks=String(tk(x)-Number(c.start.ticks));c.move(d);}
 function R(x){return Math.round(x*1000)/1000;}
 `;
 const wrap = (body) => `(function(){try{${HEAD}
@@ -141,7 +149,7 @@ const tr = await run(`var T=${JSON.stringify(st.trims)}, H=${JSON.stringify(st.h
     if(Math.abs(x.c.end.seconds-T[i].en)>EPS){ x.c.end=tm(T[i].en); n++; }
     if(Math.abs(x.c.end.seconds-T[i].en)>EPS) bad.push('trim failed '+String(x.c.name)); }
   for(i=0;i<H.length;i++){ var y=m[H[i].id]; if(!y){bad.push('gone '+H[i].id);continue;}
-    if(Math.abs(y.c.start.seconds-H[i].st)<EPS) y.c.move(tm(H[i].tg-H[i].st));
+    if(Math.abs(y.c.start.seconds-H[i].st)<EPS) moveTo(y.c, H[i].tg);
     if(Math.abs(y.c.end.seconds-H[i].en)>EPS) y.c.end=tm(H[i].en); n++;
     if(Math.abs(y.c.start.seconds-H[i].tg)>EPS||Math.abs(y.c.end.seconds-H[i].en)>EPS) bad.push('head trim failed '+String(y.c.name)); }
   return JSON.stringify({done:n, bad:bad});`);
@@ -155,7 +163,7 @@ await loop(`var S=${JSON.stringify(st.shifts)}, m=index(), n=0, rem=0, i, bad=[]
     if(Math.abs(cur-S[i].tg)<EPS) continue;
     if(Math.abs(cur-S[i].st)>EPS){ bad.push('unexpected '+String(x.c.name)+' at '+R(cur)); continue; }
     if(n>=B){ rem++; continue; }
-    x.c.move(tm(S[i].tg-cur)); n++; }
+    moveTo(x.c, S[i].tg); n++; }
   return JSON.stringify({done:n, remaining:rem, bad:bad.slice(0,10)});`, 'shift');
 
 // 6. markers and in/out. Marker times take plain seconds: a Time object is an

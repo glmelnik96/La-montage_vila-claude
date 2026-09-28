@@ -135,10 +135,16 @@ every piece to an absolute target:
 
 ## 6. Slides on V2 — `scripts/placestills.mjs`
 
-- Deck → PNG: LibreOffice headless → PDF with `ExportHiddenSlides`, then PyMuPDF at
-  width 3840. Use `soffice.com`, not `soffice.exe` (the latter never returns in a
-  shell) and a throwaway `-env:UserInstallation`. Check one slide at full size for
-  fonts before trusting the batch.
+- **Deck → PNG: ask for the designer's own export first.** That means PowerPoint's File → Export → PNG at 3840×2160, which gives `Slide1.png`, `Slide2.png`, ….
+  - LibreOffice misrendered two client decks, and nothing in a one-slide font check showed it:
+    - patterned fills became black blocks;
+    - box outlines vanished;
+    - text reflowed;
+    - the brand fonts were substituted.
+  - The client saw it in the episodes and sent the PowerPoint export. It replaced every still at the same ranges; match by picture (the numbering held, all at the same index).
+  - PowerPoint is not installed on this machine, so there is no COM route here.
+- LibreOffice is the stopgap only, and say so in the report: headless → PDF with `ExportHiddenSlides`, then PyMuPDF at width 3840. Use `soffice.com`, not `soffice.exe` (the latter never returns in a shell), and a throwaway `-env:UserInstallation`.
+- A zip of an export can land deeper than MAX_PATH: 283 characters on one job. Python with a `\\?\` prefix reads it; an argument with that path did not survive bash → Python. Copy the files next to the project before anything else touches them.
 - Store the PNGs next to the project, never in a temp folder — they become media.
 - `overwriteClip` places a still at the default length; the script trims each by
   assigning a `Time` to `end`, in time order, so a default length only ever runs

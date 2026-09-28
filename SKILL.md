@@ -1,6 +1,6 @@
 ---
 name: premiere-autopilot
-description: Use when editing in a live, already-open Adobe Premiere Pro — podcast or interview cuts and vertical reels, syncing cameras to a separate audio recorder, applying reviewer notes and splitting an edit into episodes, laying or replacing a slide deck, interview selects with title cards, a documentary canvas with B-roll and subtitles, After Effects graphics over an edit — or when checking the sound, frames or joins of such an edit.
+description: Use when editing in a live, already-open Adobe Premiere Pro — podcast or interview cuts and vertical reels, syncing cameras to a separate audio recorder, applying reviewer notes and splitting an edit into episodes, laying or replacing a slide deck, interview selects with title cards, a documentary canvas with B-roll and subtitles, After Effects graphics over an edit, grading the footage in DaVinci and putting it back — or when checking the sound, frames or joins of such an edit.
 ---
 
 # premiere-autopilot
@@ -265,6 +265,28 @@ ae-motion-live §5e. The short version:
    to, give it a guard or a test, and fix the step that misled you. This is the user's
    standing order.
 
+### J. Grading in DaVinci: the edit's video out, the graded video back in
+**REQUIRED:** `references/grade-roundtrip.md`. The short version:
+1. **Dump the episodes** with `seqdump.mjs`. Check that V1 carries default Motion and no
+   effects: a punch-in would be baked into the grade.
+2. **Build the grading timeline and its XML** with `gradexml.mjs`: V1 pieces only, no stills,
+   no audio, a marker per episode.
+   - `--mode visible` keeps only what no full-frame still covers. That was 0.9 of 24.7 min on
+     one course.
+   - `--mode all` keeps every piece.
+   - Then check the XML against the plan with `gradexmlcheck.py`.
+3. **The user renders Individual clips.** File names must carry the source name and the source
+   timecode in frames.
+4. **Snap the episodes to the frame grid first** with `gridfix.mjs --fix`, then run
+   `gradesub.mjs`:
+   - match every render by source + timecode, and check its frame count;
+   - make backups;
+   - place the video only (the render's own audio goes to an empty track and is removed);
+   - check every track against the snapshot.
+5. **Verify on code values:** `tlexport.mjs` (a Rec.709 H.264 export) and `gradeverify.py`.
+   Each frame must match its own frame of the render (Y difference ≈0.3) better than both
+   neighbours. Do not compare JPEG exports: they carry a Rec.709→sRGB conversion.
+
 ## Rules by topic
 
 ### Host scripting (ExtendScript)
@@ -311,6 +333,15 @@ ae-motion-live §5e. The short version:
   - An off-grid placement rounds UP: `overwriteClip(item, 6.5)` at 25 fps landed on 6.52.
   - Aim a millisecond into the frame (`assemble.mjs` does, for in, out, end and the
     placement), or give ticks: 254016000000 per second, 10160640000 per 25p frame.
+  - **Moves must be built in ticks too.** Before 2026-09-28, `ripplecut.mjs` moved items by a
+    seconds delta, and every item after a cut landed 1 tick (≈4 ns) past the grid.
+    - No DOM read shows it.
+    - The frame at such an edge shows the previous item: a slide switch came one frame late.
+    - When the graded video was later overwritten on the grid, 1-tick slivers of the old clips
+      were left behind.
+    - `ripplecut` now moves to absolute targets in ticks. `gridfix.mjs` lists such edges; with
+      `--fix` it snaps them and removes the slivers. Run it after any scripted move, and before
+      laying material over an edit.
 - **Audio-only files are interpreted at 29.97 fps.**
   - A recorder WAV's `projectItem.setInPoint(136.92)` lands on 136.9034: up to a 29.97 frame
     (33 ms) off the cameras on a 25p timeline, with every DOM position still looking right.
@@ -456,6 +487,11 @@ ae-motion-live §5e. The short version:
 - **After a big rearrange** the first export may render a BRAW layer black. Render the frame
   again and compare decoded pixels.
 - **Compare frames by decoded pixels** (`ffmpeg -f rawvideo … | md5sum`), not by PNG bytes.
+- **A JPEG export is not the timeline's code values.** Premiere converts Rec.709 to sRGB for
+  it: against the file's own decode, shadows and mids come out darker (7→3, 42→33, 111→105),
+  and highlights stay put. To compare the timeline with a video file, export Rec.709 video
+  (`tlexport.mjs`, «H264 Match Source - High bitrate» in `3F3F3F3F_4D6F6F56/`) and compare the
+  Y planes.
 
 ### Canvas quality
 - **B-roll variety is about places and subjects, not clip ids.**
