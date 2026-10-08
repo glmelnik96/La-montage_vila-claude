@@ -4,8 +4,13 @@
 # the Program monitor or the Essential Graphics panel — unlike a rendered PNG.
 #
 #   python scripts/mogrtcard.py --cards cards.json --out-dir <dir> [--font SBSansDisplay-Semibold]
-#        [--size 64] [--width 34]
+#        [--size 64] [--width 34] [--fill 0] [--bg 16777215 --bg-opacity 80 --bg-size 16]
 #   cards.json: [{"id": "A03", "text": "Вопрос целиком"}, ...]  ->  <out-dir>/<id>.mogrt
+#   A text that already holds line breaks (\r or \n) keeps them: subtitles with the user's lines.
+#   --fill is the text colour and --bg a plate behind the text, both as Premiere stores a colour
+#   (a 24-bit integer: 0 black, 16777215 white). The plate keys mBackFillVisible / mBackFillColor /
+#   mBackFillOpacity / mBackFillSize are not in Basic Title's JSON, but Premiere reads them (found
+#   in its binary; a render showed black text on a white plate, 2026-10-08).
 #
 # Why a new file per card: ExtendScript cannot set a graphic's text. `Source Text` reads back as
 # a single garbage character and a Premiere-authored .mogrt exposes no MGT parameters
@@ -22,10 +27,14 @@ def arg(k, d=None):
 
 SRC = arg('template', r'C:/Program Files/Adobe/Adobe Premiere Pro 2026/Essential Graphics/Basic Title.mogrt')
 FONT, SIZE, WIDTH = arg('font', 'SBSansDisplay-Semibold'), float(arg('size', 64)), int(arg('width', 34))
+FILL, BG = arg('fill'), arg('bg')
+BGOP, BGSZ = float(arg('bg-opacity', 80)), float(arg('bg-size', 16))
 
 
 def wrap(text, width):
     """Break into lines of about `width` characters, never inside a word; Premiere wants \\r."""
+    if '\r' in text or '\n' in text:
+        return '\r'.join(x.strip() for x in re.split(r'[\r\n]+', text) if x.strip())
     lines, cur = [], ''
     for w in text.split():
         if cur and len(cur) + 1 + len(w) > width:
@@ -51,7 +60,15 @@ def patch_prproj(xml, text):
         ss['mText'] = text
         ss['mFontName']['mParamValues'] = [[0, FONT]]
         ss['mFontSize']['mParamValues'] = [[0, SIZE]]
+        if FILL is not None:
+            ss['mFillColor']['mParamValues'] = [[0, int(FILL)]]
         j['mTextParam']['mLeading'] = 0
+        if BG is not None:
+            tp = j['mTextParam']
+            tp['mBackFillVisible'] = True
+            tp['mBackFillColor'] = int(BG)
+            tp['mBackFillOpacity'] = BGOP
+            tp['mBackFillSize'] = BGSZ
         enc = json.dumps(j, ensure_ascii=False, separators=(',', ':')).encode('utf-16-le')
         blob = struct.pack('<Q', len(enc)) + enc
         return m.group(1) + base64.b64encode(blob).decode('ascii') + m.group(3)

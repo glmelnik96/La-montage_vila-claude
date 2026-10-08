@@ -6,7 +6,10 @@
 // one clip), pieces inside are removed, and every item after b moves left by b - a in
 // ascending order. No item passes another, so each track's item list stays in time order
 // (moving clips past each other breaks a track: see trackorder.mjs). Markers after b and
-// the in/out points move too.
+// the in/out points move too, and so do the transitions after b: TrackItem.move() leaves a clip's
+// fades behind (Track.transitions), and a dialogue clip whose Custom Fade stayed behind played its
+// source early while every DOM read looked right (2026-10-08, see rippleinsert.mjs). A transition
+// across a or b is reported; check it by eye.
 //
 //   node scripts/ripplecut.mjs --seq "<active sequence>" --cut <a>,<b> [--batch 12] [--fps 25]
 //
@@ -121,7 +124,12 @@ if (existsSync(STATE)) {
     for(i=0;i<o.length;i++){ c=o[i].c; r.push({k:o[i].k,tr:o[i].tr,st:R(o[i].st),en:R(o[i].en),sIn:R(c.inPoint.seconds),name:String(c.name),still:isStill(c)?1:0,id:o[i].id}); }
     var m=s.markers, k=m.getFirstMarker(), ms=[], n=0;
     while(k && n<5000){ ms.push({st:R(k.start.seconds),en:R(k.end.seconds),name:String(k.name),guid:String(k.guid)}); n++; k=m.getNextMarker(k); }
-    return JSON.stringify({items:r, markers:ms, inP:parseFloat(s.getInPoint()), outP:parseFloat(s.getOutPoint())});`);
+    // items that already overlap their predecessor (a transition between them) are not new overlaps
+    var pre=[], T3, t3, q3; for(t3=0;t3<2;t3++){ T3=t3?s.audioTracks:s.videoTracks; for(i=0;i<T3.numTracks;i++){ var L3=T3[i].clips;
+      for(q3=1;q3<L3.numItems;q3++) if(L3[q3].start.seconds<L3[q3-1].end.seconds-EPS) pre.push(String(L3[q3].nodeId)); } }
+    var trs=[], G2=[s.videoTracks, s.audioTracks], z, u, TT;
+    for(z=0;z<2;z++) for(u=0;u<G2[z].numTracks;u++){ TT=G2[z][u].transitions; for(var w=0;w<TT.numItems;w++) trs.push({k:z?'a':'v', tr:u, st:R(TT[w].start.seconds), en:R(TT[w].end.seconds), name:String(TT[w].name)}); }
+    return JSON.stringify({items:r, markers:ms, transitions:trs, pre:pre, inP:parseFloat(s.getInPoint()), outP:parseFloat(s.getOutPoint())});`);
   const it = snap.items;
   const remove = it.filter((c) => c.st >= A - EPS && c.en <= Z + EPS);
   const trims = it.filter((c) => c.still && c.st < A - EPS && c.en > A + EPS).map((c) => ({ id: c.id, en: +(c.en > Z + EPS ? c.en - D : A).toFixed(3) }));
@@ -132,7 +140,10 @@ if (existsSync(STATE)) {
   const keep = it.filter((c) => !touched.has(c.id)).map((c) => ({ id: c.id, st: c.st, en: c.en }));
   const marks = snap.markers.filter((m) => m.st >= A - EPS).map((m) => ({ ...m, tg: +(m.st >= Z - EPS ? m.st - D : A).toFixed(3) }));
   const mvp = (x) => +(x > Z + EPS ? x - D : x > A ? A : x).toFixed(3);
-  st = { seq: SEQ, a: A, b: Z, d: D, remove: remove.map((c) => c.id), trims, heads, shifts, keep, marks,
+  const tshifts = (snap.transitions || []).filter((t) => t.st >= Z - EPS).map((t) => ({ ...t, tg: +(t.st - D).toFixed(3) })).sort((p, q) => p.st - q.st);
+  const tacross = (snap.transitions || []).filter((t) => (t.st < A - EPS && t.en > A + EPS) || (t.st < Z - EPS && t.en > Z + EPS));
+  if (tacross.length) console.error(`WARNING: transitions across the cut, check them by eye: ${tacross.map((t) => `${t.k.toUpperCase()}${t.tr + 1} ${t.name} ${t.st}-${t.en}`).join('; ')}`);
+  st = { seq: SEQ, a: A, b: Z, d: D, remove: remove.map((c) => c.id), trims, heads, shifts, keep, marks, tshifts, pre: snap.pre,
     inP: snap.inP, outP: snap.outP, inTg: mvp(snap.inP), outTg: mvp(snap.outP) };
   writeFileSync(STATE, JSON.stringify(st, null, 1));
   console.error(`plan: remove ${remove.length}, trim ${trims.length + heads.length} still(s), shift ${shifts.length} items and ${marks.length} markers by -${D}; out ${snap.outP} -> ${st.outTg}`);
@@ -166,6 +177,18 @@ await loop(`var S=${JSON.stringify(st.shifts)}, m=index(), n=0, rem=0, i, bad=[]
     moveTo(x.c, S[i].tg); n++; }
   return JSON.stringify({done:n, remaining:rem, bad:bad.slice(0,10)});`, 'shift');
 
+// 5b. transitions after b, earliest first, each found by its track and start
+const tsr = await run(`var L=${JSON.stringify(st.tshifts || [])}, i, j, bad=[], n=0;
+  for(i=0;i<L.length;i++){ var TT=(L[i].k==='v'?s.videoTracks:s.audioTracks)[L[i].tr].transitions, hit=null, there=false;
+    for(j=0;j<TT.numItems;j++){ var x=TT[j]; if(Math.abs(x.start.seconds-L[i].tg)<EPS) there=true; else if(Math.abs(x.start.seconds-L[i].st)<EPS) hit=x; }
+    if(there) continue;
+    if(!hit){ bad.push('no transition '+L[i].k+(L[i].tr+1)+' @'+L[i].st); continue; }
+    var d=new Time(); d.ticks=String(tk(L[i].tg)-Number(hit.start.ticks)); hit.move(d); n++;
+    if(Math.abs(hit.start.seconds-L[i].tg)>EPS) bad.push('transition did not move '+L[i].k+(L[i].tr+1)+' @'+L[i].st); }
+  return JSON.stringify({done:n, bad:bad});`);
+if (tsr.bad.length) throw new Error(`transitions: ${JSON.stringify(tsr.bad)}`);
+console.error(`  transitions moved: ${tsr.done}${st.tshifts ? '' : ' (a plan from before 2026-10-08 has none: check the fades by hand)'}`);
+
 // 6. markers and in/out. Marker times take plain seconds: a Time object is an
 //    "Illegal Parameter type". A marker that refuses to move is re-created (name, comment,
 //    colour, length) and the old one deleted.
@@ -197,7 +220,8 @@ console.error(`  markers moved: ${mk.done}${mk.recreated ? ` (${mk.recreated} re
 
 // 7. check: every item where the plan says, nothing overlapping, lists in time order
 const ck = await run(`var m=index(), i, bad=[], inv=0, t, q, tr, last=0;
-  var RM=${JSON.stringify(st.remove)}, S=${JSON.stringify(st.shifts)}, T=${JSON.stringify(st.trims)}, K=${JSON.stringify(st.keep)};
+  var RM=${JSON.stringify(st.remove)}, S=${JSON.stringify(st.shifts)}, T=${JSON.stringify(st.trims)}, K=${JSON.stringify(st.keep)}, PRE={}, P0=${JSON.stringify(st.pre || [])};
+  for(i=0;i<P0.length;i++) PRE[P0[i]]=1;
   for(i=0;i<RM.length;i++) if(m[RM[i]]) bad.push('not removed '+String(m[RM[i]].c.name)+' @'+R(m[RM[i]].st));
   for(i=0;i<S.length;i++){ var x=m[S[i].id]; if(!x) bad.push('shifted item gone'); else if(Math.abs(x.st-S[i].tg)>EPS) bad.push('not shifted '+String(x.c.name)+' @'+R(x.st)); }
   for(i=0;i<T.length;i++){ var y=m[T[i].id]; if(!y||Math.abs(y.en-T[i].en)>EPS) bad.push('trim lost'); }
@@ -205,7 +229,7 @@ const ck = await run(`var m=index(), i, bad=[], inv=0, t, q, tr, last=0;
   function scan(T2,label){ for(t=0;t<T2.numTracks;t++){ tr=T2[t]; for(q=0;q<tr.clips.numItems;q++){ var c=tr.clips[q];
       if(c.end.seconds>last) last=c.end.seconds;
       if(q>0 && c.start.seconds<tr.clips[q-1].start.seconds-0.001) inv++;
-      if(q>0 && c.start.seconds<tr.clips[q-1].end.seconds-EPS) bad.push('overlap '+label+(t+1)+' @'+R(c.start.seconds)); } } }
+      if(q>0 && c.start.seconds<tr.clips[q-1].end.seconds-EPS && !PRE[String(c.nodeId)]) bad.push('overlap '+label+(t+1)+' @'+R(c.start.seconds)); } } }
   scan(s.videoTracks,'V'); scan(s.audioTracks,'A');
   return JSON.stringify({bad:bad.slice(0,20), inversions:inv, seqEnd:R(s.end/254016000000), lastClip:R(last), out:parseFloat(s.getOutPoint())});`);
 console.log(JSON.stringify(ck));

@@ -85,6 +85,11 @@ before import. The script header documents where it lives inside the .mogrt.
 - `--template` points at another Premiere version's `Basic Title.mogrt`.
 - After `sequence.importMGT(path, ticks, 0, 0)`, set `end`.
 - Centre the block: Text › Position y = 0.5165 − (lines−1)·0.0356, at 34 characters a line.
+- Subtitles as graphics: `--fill 0 --bg 16777215 --bg-opacity 80 --bg-size 16` gives black text on
+  a white plate. Text that already holds line breaks keeps them. For Onest Bold 44 on 1080p,
+  bottom-aligned with the plate's foot at ≈1042 px: Text › Position y = 0.941 for one line,
+  0.892 for two (`properties[2]` of the Text component). Place them in time order: each MOGRT
+  arrives at its default length and eats into whatever follows on the track.
 
 ## 7. Build per speaker
 

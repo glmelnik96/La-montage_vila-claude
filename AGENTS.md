@@ -62,7 +62,8 @@ Every script's header comment documents its flags. SKILL.md says which workflow 
 - **Premiere:** `pr.mjs` (snapshot, backup, transcribe, cut, markers, reframe, import,
   overlay, activate), `_ev.mjs` (host JSX from a file), `_pev.mjs` (JS in the panel).
 - **Timeline:** `seqdump` (read-only dump), `gridfix` (snap edges to the frame grid), `assemble`,
-  `rearrange`, `ripplecut`, `placestills`, `trackorder`,
+  `rearrange`, `ripplecut`, `rippleinsert` (gaps on every track, music and fades carried along),
+  `placestills`, `trackorder`,
   `markercolors`, `fillmono`, `blockcut`.
 - **Audio and transcription:** `audio`, `scan`, `mixdown`, `transcribe_local.py`,
   `transcribe_mixed.py`, `rewin.py`, `splicecheck.py`, `cloudtr`, `cloudsplit`, `cloudedges`,

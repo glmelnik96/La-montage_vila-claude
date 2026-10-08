@@ -99,6 +99,18 @@ Things that REQUIRE this escape hatch (the built-ins can't do them):
   Always compute `endSec` from the audio track's last clip end and verify the cached
   `segments[last].endSec` matches before trusting a transcript.
 
+- **Transitions.** `track.transitions` is a collection of the track's transitions (start, end,
+  name); each moves with `move(Time delta)` like a clip. `TrackItem.move()` on a clip does not
+  carry them (2026-10-08). To add one, QE:
+  `qeItem.addTransition(qe.project.getVideoTransitionByName('Cross Dissolve'), true, '00:00:01:05')`
+  puts a 1.2 s dissolve on the head (`false`: the tail). Find `qeItem` among
+  `qe.project.getActiveSequence().getVideoTrackAt(i).getItemAt(k)`, which also lists `Empty`
+  gaps; a QE item has no `inPoint`.
+- **Hiding a clip.** `trackItem.disabled = true` works; it stays on the track, dimmed, and no
+  longer renders.
+- **A script must return JSON.** `evalJson` refuses a bare string ("JSON от хоста: …"), even
+  after the work in the script is done.
+
 ## Not available (don't try)
 
 - **Frame export on the DOM `Sequence`.** `seq.exportFramePNG` and `seq.exportFrameJPEG` do

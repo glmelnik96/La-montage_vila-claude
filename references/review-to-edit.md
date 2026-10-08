@@ -133,6 +133,31 @@ every piece to an absolute target:
   leaves `outPoint` unchanged — an inconsistent clip (67.92 s long, 67.16 s of
   source). Set `outPoint` (a whole `Time` object) explicitly, then `end`.
 
+## 5b. Gaps for cards — `scripts/rippleinsert.mjs`
+
+The reviewer asks for a full-screen card before every block, and the cut is finished: music,
+fades, subtitles and B-roll all sit on it. `rippleinsert.mjs --seq … --at t:d,t:d --extend A4,A7
+[--dry-run]` opens all the gaps at once, in the sequence's current coordinates:
+
+- Put every `t` on an edit point. A clip crossing a gap stops the run before anything changes
+  (`--dry-run` lists them); so does a transition across one.
+- Items after a gap move right, latest first. Stills, adjustment layers and graphics across a
+  gap grow. Clips on `--extend` tracks grow through it, outPoint first, and music that starts
+  exactly on a gap keeps its start, so the block's music opens with its card. Remix pieces grow
+  without re-remixing (verified bit-identical).
+- Transitions move with their clips (`track.transitions`, `move(Time delta)`). Before
+  2026-10-08 nothing moved them: every fade stayed at its old time, and one dialogue clip played
+  its source 14.88 s early. The rendered windows next to the edits caught it once they stopped
+  being skipped.
+- Markers and the In/Out move. The plan is saved in `gen-out/rippleins_<seqID>_<gaps>.json`,
+  so a re-run after a timeout continues it.
+- Use the room that is already there. A block that opens on a 1.5 s pause or B-roll takes its
+  card over that pause plus a smaller gap; one that opens without speech for longer gets a plate
+  over its first shot instead of a card. That was the user's rule on one documentary.
+- Check it: `gridfix.mjs`, `trackorder.mjs`, frames on every card, and the render against the
+  original in every 2 s window («Sound»). Windows inside grown music correlate at 0.75–0.9 by
+  design; speech must stay at 1.0.
+
 ## 6. Slides on V2 — `scripts/placestills.mjs`
 
 - **Deck → PNG: ask for the designer's own export first.** That means PowerPoint's File → Export → PNG at 3840×2160, which gives `Slide1.png`, `Slide2.png`, ….

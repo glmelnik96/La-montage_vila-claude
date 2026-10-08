@@ -169,7 +169,8 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
    - A new order: `rearrange.mjs`, then `sequence.clone()` of the result (it keeps effects),
      or `assemble.mjs` when the clips carry no effects.
    - Then `trackorder.mjs`, expected vs actual, and a rendered frame from late in the source.
-   - Slides go on with `placestills.mjs`. One range out later: `ripplecut.mjs`.
+   - Slides go on with `placestills.mjs`. One range out later: `ripplecut.mjs`. Gaps in
+     (cards before blocks): `rippleinsert.mjs`.
    - A replaced deck: map old to new slides by text and strip only the old folder's stills.
      Removing a slide exposes the jump cuts under it.
 5. **Hear every join again** on the finished sequence, and every episode edge. Transcribe a
@@ -293,8 +294,9 @@ ae-motion-live §5e. The short version:
 - **ES3 only.** None of the following work:
   - arrow functions, `let`/`const`, template literals, destructuring;
   - `Array.prototype.find`/`forEach`/`map`/`filter`/`indexOf` (use `for` loops);
-  - reserved words as object keys: `short`, `int`, `char`, `byte`, `long`, `float`,
-    `double`, `class`, `enum`, `final`, `native`, `export`, `import`…
+  - reserved words as object keys or variable names: `short`, `int`, `char`, `byte`, `long`,
+    `float`, `double`, `class`, `enum`, `final`, `native`, `export`, `import`… (`var short=[]`
+    killed a whole step on 2026-10-08)
   These fail at PARSE time as an opaque `EvalScript error` with no line number, which
   `try/catch` cannot catch. So does a negative number pasted after a minus sign (`x-${v}`
   with v = −400000 gives the decrement `x--400000`). Wrap interpolated numbers in
@@ -380,8 +382,19 @@ ae-motion-live §5e. The short version:
     markers and the In/Out.
 - **Inserting ripples one track only.** `track.insertClip(item, t)` and
   `sequence.insertClip(item, t, v, a)` moved V1 and the markers, but A1, V2 and V3 stayed
-  (26.3.2), leaving sound and graphics out of sync. Push the edit by shifting every track
-  yourself, in descending start order, or build the insert into the assembly.
+  (26.3.2), leaving sound and graphics out of sync. Open gaps with `rippleinsert.mjs --at
+  t:d,… --extend <music tracks>` (cards before blocks), or build the insert into the assembly.
+  It moves every track in descending start order, grows stills, adjustment layers and the music
+  through the gap, and moves the transitions. Details: `references/review-to-edit.md` §5b.
+- **`TrackItem.move()` leaves the clip's transitions behind.** They live in `track.transitions`
+  and move with their own `move(Time delta)`. A fade left behind is not harmless: a dialogue clip
+  with an Enhance Speech pre-render and a Custom Fade played its source 14.88 s early after the
+  move, while its DOM `inPoint` still read right (2026-10-08). `ripplecut` and `rippleinsert`
+  now move transitions; any other scripted move must too. Re-writing `inPoint` did not cure it;
+  moving the fade did.
+- **Nested sequences are shared between sequences.** Editing a nest's content in a copy edits the
+  original too: replace or move the instances instead. `sequence.overwriteClip(nest, t, v, a)`
+  put the nest's own (silent) audio on a NEW audio track, not on track `a`: remove it.
 - **A synced multicam stack is cut at absolute targets.** Cameras restart mid-take.
   - Intersect each kept range with every clip on every track.
   - `overwriteClip` the sub-ranges at their new positions.
@@ -426,6 +439,13 @@ ae-motion-live §5e. The short version:
     per clip.
 - **Prove the sound by rendering it** («Rendering and looking»). Both channels at the same
   RMS prove a one-sided fix; the speech median proves a gain match.
+- **After a ripple, compare the render with the original in EVERY window.** Map each 2 s window
+  of the old render through the plan's shift and correlate. A check that skipped the windows
+  next to the edits missed every fade left behind; one solo-track render (clone, mute the rest)
+  then shows which clip plays what.
+- **Remix music can be lengthened by script.** `outPoint` + `end` on a Remix piece continues the
+  remix: the old part stayed bit-identical and the new tail was the remix's own continuation
+  (2026-10-08). The Remix data lives in `<RemixClip>` of the prproj; its in/out are remix time.
 
 ### Transcription and cut points
 - **Transcript = WHAT; waveform = WHERE.** Whisper times drift up to ~1 s: word starts after
@@ -510,6 +530,11 @@ ae-motion-live §5e. The short version:
   - Import it, then `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE)`.
   - `captionTracks` is not exposed; QE frames show the captions.
   - Font and plate are set in Track Style.
+  - **When the user has turned them into Graphic clips** (Essential Graphics text), their text is
+    FlatBuffers inside the prproj: not scriptable. Rebuild them as one .mogrt per cue with
+    `mogrtcard.py --fill … --bg …` (text colour, plate) at the old clips' times, place with
+    `importMGT`, bottom-align by Text › Position per line count, then set the old clips'
+    `disabled = true` instead of deleting them.
 
 ## Payload shapes (`pr.mjs`, host `_EXT_PRM_` 2.16–2.17)
 Payloads go in with `--file <payload.json>` or `--json '<payload>'`.
