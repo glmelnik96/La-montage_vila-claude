@@ -135,6 +135,10 @@ The panel only loads once a project is open, and Premiere starts on its Home scr
   - It clicks only if the window under the point then belongs to Premiere. Otherwise it clicks nothing
     and exits 4.
   - `-DryRun` does everything except the click.
+- **The first click on a cold start can come too early.** On 2026-10-08, launched from closed (After
+  Effects open beside it), the offset click hit a Home screen that was drawn but not yet live: no file
+  dialog came up, and propen stopped. A second run opened the project. propen now clicks again, up
+  to three times, while the Home screen is still the only window up.
 - **Timings.**
   - From the Home screen to the panel with the project focused: 16.5 s.
   - With the panel already up: 1 s.

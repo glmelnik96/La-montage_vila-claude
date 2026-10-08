@@ -10,7 +10,8 @@
 #   --fill is the text colour and --bg a plate behind the text, both as Premiere stores a colour
 #   (a 24-bit integer: 0 black, 16777215 white). The plate keys mBackFillVisible / mBackFillColor /
 #   mBackFillOpacity / mBackFillSize are not in Basic Title's JSON, but Premiere reads them (found
-#   in its binary; a render showed black text on a white plate, 2026-10-08).
+#   in its binary; a render showed black text on a white plate, 2026-10-08). Rounded plate corners
+#   have no key in this JSON at all: they are set in Premiere (Essential Graphics) afterwards.
 #
 # Why a new file per card: ExtendScript cannot set a graphic's text. `Source Text` reads back as
 # a single garbage character and a Premiere-authored .mogrt exposes no MGT parameters

@@ -93,12 +93,23 @@ if (!(await panelUp())) {
   }
   if (clicked) {
     via = `${via === 'launched' ? 'launched, ' : ''}Home screen (${clicked.how})`;
+    // On a cold start (2026-10-08) the first click landed on a Home screen that was drawn but not
+    // yet live: no dialog came up, and a second run opened the project. So click again, up to three
+    // times, while the Home screen is still the only thing up.
     let filled = false;
-    for (let i = 0; i < 20 && !filled; i++) {
-      await sleep(1000);
-      try { filled = /posted IDOK/.test(ps('filedlg.ps1', ['-Title', 'Open Project', '-Path', PROJECT])); } catch { /* not open yet */ }
+    for (let attempt = 1; attempt <= 3 && !filled; attempt++) {
+      if (attempt > 1) {
+        const ws = windows(), main = ws.find((w) => w.main);
+        if (await panelUp()) break;
+        if (others(ws).length || !main || !ws.some((w) => isHome(w, main))) break;   // something else came up
+        try { const r = JSON.parse(ps('uiclick.ps1', ['-Proc', PROC, '-Name', 'Open Project', '-RelX', '83', '-RelY', '238', '-MainTitle', 'Adobe Premiere'])); if (!r.ok) continue; } catch { continue; }
+      }
+      for (let i = 0; i < 20 && !filled; i++) {
+        await sleep(1000);
+        try { filled = /posted IDOK/.test(ps('filedlg.ps1', ['-Title', 'Open Project', '-Path', PROJECT])); } catch { /* not open yet */ }
+      }
     }
-    if (!filled) stop(`clicked "Open Project" (${clicked.how}) but no file dialog came up`);
+    if (!filled && !(await panelUp())) stop(`clicked "Open Project" (${clicked.how}) three times but no file dialog came up`);
   }
   const t1 = Date.now();
   while (!(await panelUp())) {

@@ -525,6 +525,11 @@ ae-motion-live §5e. The short version:
 - **Read the canvas for repeats before handing it over.** Print every piece's words in order
   and list the 4-word phrases that two pieces share. Keep one ending, one self-introduction,
   and one telling of each story.
+- **Audit a finished cut for repeated pictures** before adding material. Take the topmost picture
+  of every frame and resolve nests to their inner clips: a nest's name hides its source, and the
+  same lake bench sat in two different nests 10 minutes apart. Flag shots that share a source range,
+  and shots whose middle frames correlate above 0.8 at 64×36 grey. List the talking-head stretches
+  over 10 s with their words: that is where unused material goes, matched to what is said.
 - **Subtitles are native captions, never rendered cards.** The user edits them in Premiere.
   - Build the SRT with `subcues.mjs`.
   - Import it, then `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE)`.
@@ -535,6 +540,10 @@ ae-motion-live §5e. The short version:
     `mogrtcard.py --fill … --bg …` (text colour, plate) at the old clips' times, place with
     `importMGT`, bottom-align by Text › Position per line count, then set the old clips'
     `disabled = true` instead of deleting them.
+  - Rounded plate corners cannot go into the .mogrt: the legacy text JSON has no such key (only
+    `mBackFill…` Visible/Color/Opacity/Size). Premiere keeps them in its newer binary text format, as
+    one extra float (the user's «лёгкое скругление» was 20.1) on every graphic. After regenerating a
+    cue, the user (or a copy from a neighbour) puts the rounding back.
 
 ## Payload shapes (`pr.mjs`, host `_EXT_PRM_` 2.16–2.17)
 Payloads go in with `--file <payload.json>` or `--json '<payload>'`.
