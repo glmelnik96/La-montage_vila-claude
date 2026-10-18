@@ -108,6 +108,29 @@ Things that REQUIRE this escape hatch (the built-ins can't do them):
   gaps; a QE item has no `inPoint`.
 - **Hiding a clip.** `trackItem.disabled = true` works; it stays on the track, dimmed, and no
   longer renders.
+- **A new sequence from a preset.** `app.project.newSequence(name, new File(preset).fsName)` with
+  `…/Settings/SequencePresets/HD 1080p/HD 1080p 25 fps.sqpreset` made a 1920×1080 25p stereo
+  sequence (V3 A4) with no dialog (2026-10-09). It returns nothing useful: diff the `sequenceID`s.
+  Add video tracks with QE `addTracks(n, after, 0)`.
+- **Renaming a project item** (`projectItem.name = …`) changes the Project panel only: clips
+  already on a timeline keep the name they were placed with.
+- **A new project.** The panel needs some project open first: open any small one with
+  `propen.mjs`, then `app.newProject(new File(path).fsName)` returns `true` and focuses the new
+  project. Then `app.projects[i].closeDocument(false, false)` on the bootstrap one closes it without
+  saving, and focus stays on the new project (2026-10-16).
+- **A vertical sequence:** the preset `Settings/SequencePresets/Social/Social Media Portrait 9x16 30
+  fps.sqpreset` gives 1080×1920 30p stereo. An iPhone HEVC clip with rotation −90 comes in upright
+  (1080×1920). A Basic Title MOGRT arrives at Text › Scale 56.25 (1080/1920): set it back to 100.
+- **A mosaic tile.** Add the Crop effect with QE `addVideoEffect(qe.project.getVideoEffectByName('Crop'))`.
+  Its Left/Top/Right/Bottom are percent of the SOURCE frame and apply before Motion. So: crop to the
+  face region, Scale = tile width / region width, and Position = tile centre − (region centre −
+  source centre)·scale, normalized to the sequence. All 15 tiles landed on their cells first time.
+- **Swapping a rendered graphic for a new version:** `projectItem.changeMediaPath(new File(p).fsName,
+  true)` (check `canChangeMediaPath()` first). Every clip of the item keeps its place, length and effects,
+  and the next frame export already shows the new media (2026-10-16). Write the new version to a NEW
+  file name: the old one may still be held open by Premiere.
+- **`track.overwriteClip` keeps going past the media.** See SKILL.md «Times»: check `src_in +
+  length` against the duration yourself.
 - **A script must return JSON.** `evalJson` refuses a bare string ("JSON от хоста: …"), even
   after the work in the script is done.
 

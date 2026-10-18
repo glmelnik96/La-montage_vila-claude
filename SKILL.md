@@ -295,8 +295,8 @@ ae-motion-live §5e. The short version:
   - arrow functions, `let`/`const`, template literals, destructuring;
   - `Array.prototype.find`/`forEach`/`map`/`filter`/`indexOf` (use `for` loops);
   - reserved words as object keys or variable names: `short`, `int`, `char`, `byte`, `long`,
-    `float`, `double`, `class`, `enum`, `final`, `native`, `export`, `import`… (`var short=[]`
-    killed a whole step on 2026-10-08)
+    `float`, `double`, `class`, `enum`, `final`, `native`, `export`, `import`, `in`… (`var short=[]`
+    killed a whole step on 2026-10-08, `{in: …}` another on 2026-10-09)
   These fail at PARSE time as an opaque `EvalScript error` with no line number, which
   `try/catch` cannot catch. So does a negative number pasted after a minus sign (`x-${v}`
   with v = −400000 gives the decrement `x--400000`). Wrap interpolated numbers in
@@ -353,6 +353,9 @@ ae-motion-live §5e. The short version:
 - **Assigning `end` does not trim a clip.** It lengthens the item and leaves `outPoint`.
   - Set `outPoint`, then `end`, and read both back.
   - Stills are trimmed through `end` (`placestills.mjs`).
+- **An out point past the end of the media is accepted without a word.** A 1.1 s clip laid into a
+  3 s slot read back `outPoint` 3.0 and `end` as asked; past 1.1 s the frame is empty and the track
+  below shows through (2026-10-09). Check `src_in + length ≤ media duration` in the plan.
 - **A 30 fps source reports its in-points on its own 1/30 s grid.** Compare with a 0.05 s
   tolerance. That lets a piece one 25p frame off pass: remove it and re-place it.
 - **Clones inherit the source's In/Out**, sometimes the unset sentinel −400000. Set every new
@@ -433,12 +436,21 @@ ae-motion-live §5e. The short version:
   - `ffmpeg -i clip -af astats -f null -` shows ≈ −65 dB against −20 dB on the other channel.
   - Fix it with `fillmono.mjs --seq … --from right --match .MOV`. No API removes the effect;
     a double copy is harmless.
+  - **The channel can change from clip to clip within one shoot** (2026-10-09: 46 interview clips,
+    the voice on the left in some blocks and on the right in others). Measure every clip and give
+    each piece the Fill of its own channel; one `--from` for the whole shoot silences half of it.
   - QE serves a cached track item list, so «does this clip have the effect yet» reads stale.
     Drive such loops by an index window.
   - A mono downmix (`-ac 1`) hides the problem and costs 6 dB. `mixdown.mjs` takes a `ch`
     per clip.
 - **Prove the sound by rendering it** («Rendering and looking»). Both channels at the same
   RMS prove a one-sided fix; the speech median proves a gain match.
+- **Matching voices from different phones:** measure each piece's speech level in a render (the
+  50 ms frames within 25 dB of its loudest) and set clip gain to one target (−22 dB worked),
+  capped so the piece's peak stays under −1 dBFS. Where a source peak is already at 0 dBFS (a clipped
+  plosive), QE `addAudioEffect('Hard Limiter')` with its defaults plus the full gain gave a
+  −0.1 dBFS peak in the render (2026-10-16). Its parameters read back normalized (Input Boost 0.667),
+  so leave them alone.
 - **After a ripple, compare the render with the original in EVERY window.** Map each 2 s window
   of the old render through the plan's shift and correlate. A check that skipped the windows
   next to the edits missed every fade left behind; one solo-track render (clone, mute the rest)
@@ -476,6 +488,20 @@ ae-motion-live §5e. The short version:
   - a restart («ERP, 1С, … ERP, 1С, SAP» came out as one list with a 4 s hole);
   - a stumble inside a mega-segment over 8 s.
   Where the level map shows speech that no word covers, read that island alone.
+- **Whisper invents text on music and on short noises:** «Субтитры сделал DimaTorzok»,
+  «Продолжение следует…», «Спасибо.», «Драм-ролл». Treat such a line as no speech.
+- **Read a planned cut back piece by piece.** Read each piece's audio ALONE, with silence around
+  it. Reading the whole planned track and hanging the words on pieces by time moved a word across
+  almost every blade: a piece looked clipped while the word sat in its neighbour, and a clipped
+  piece looked whole.
+  - Read it WITHOUT an initial prompt. With the names from the video in the prompt, a breath before a
+    cut came out as one of those names («<name>, наслаждайся…», 2026-10-16).
+  - A whole-track read invents a repeated phrase at a junction: after «поздравляем тебя с…» it
+    heard «Тебя с новым счастьем» where the level map showed a clean −46 dB gap before «с».
+    The isolated piece and the level map decide.
+- **Two people in one clip: who says what.** Per word, the median pitch splits a man (90–145 Hz)
+  from a woman (180–280 Hz). For two men, compare the frame difference inside each mouth box per
+  phrase: the speaker's mouth moves 3–4×, the listener's under 1.
 - **Re-read every boundary in context** (`rewin.py`, ±6 s). Open on a sentence start, close
   on a sentence end. A blade in a clean pause can still be in the wrong pause.
 
@@ -494,7 +520,9 @@ ae-motion-live §5e. The short version:
 - **A frame.**
   - At any time: a one-frame In/Out (1/fps long) rendered with the JPEG preset.
   - QE `exportFramePNG(tc, new File(p).fsName)` is quicker. Past one hour it returns a frame
-    from the head of the sequence; it appends `.png`.
+    from the head of the sequence; it appends `.png`. Keep it to a few frames per call: 18 frames
+    of 50p H.264 in one call outlasted the bridge, and Premiere then crashed mid-write, leaving a
+    truncated PNG (2026-10-09). Save the project before a long frame or render run.
   - The DOM `Sequence` has no `exportFramePNG`/`exportFrameJPEG`.
   - **A clone hides a broken track:** it rebuilds the item lists. Checking a rearranged
     sequence starts with `trackorder.mjs` on the original.
@@ -507,6 +535,13 @@ ae-motion-live §5e. The short version:
 - **After a big rearrange** the first export may render a BRAW layer black. Render the frame
   again and compare decoded pixels.
 - **Compare frames by decoded pixels** (`ffmpeg -f rawvideo … | md5sum`), not by PNG bytes.
+- **A rendered graphics clip (end card, title) for Premiere:**
+  - ffmpeg converts RGB→YUV with BT.601 by default. Pass `-vf scale=out_color_matrix=bt709:out_range=tv`
+    and tag the stream bt709, or Premiere shifts the colours.
+  - Add about one level of grain to a soft gradient: 8-bit H.264 bands without it.
+  - Render it longer than the slot, with a hold and no outro, so the editor can stretch it.
+  - Wipe reveals («шторки») are per-column masks: a feathered moving edge, motion blur by averaging
+    6 sub-frame samples. Ask whether the user wants visible bars or only the moving edge.
 - **A JPEG export is not the timeline's code values.** Premiere converts Rec.709 to sRGB for
   it: against the file's own decode, shadows and mids come out darker (7→3, 42→33, 111→105),
   and highlights stay put. To compare the timeline with a video file, export Rec.709 video
@@ -530,6 +565,17 @@ ae-motion-live §5e. The short version:
   same lake bench sat in two different nests 10 minutes apart. Flag shots that share a source range,
   and shots whose middle frames correlate above 0.8 at 64×36 grey. List the talking-head stretches
   over 10 s with their words: that is where unused material goes, matched to what is said.
+- **Phone clips from editing apps end on an outro.** A CapCut clip ended on 2 s of black and a
+  logo; a mosaic tile taken from the clip's last seconds showed it. Run `blackdetect` on every
+  clip's tail before using its end. Check for letterboxing too (`cropdetect`): one 720×1280 clip held
+  a 720×892 picture, so its «fill» scale is 215 %, not 150 %.
+- **Several recordings into one message (greetings, testimonials).**
+  - Cut on the meaning: each piece picks up the previous one («…поздравляем тебя с рождением сына» →
+    «с новым счастьем» → «с этим крутейшим событием…»).
+  - One wish once, one sign-off word once.
+  - A speaker may finish another's sentence: «наикрепчайшего здоровья» + «папе, и, самое главное, мирного неба».
+  - A joint ending works: a round of sign-offs, then two «Ура!» layered on two tracks over a mosaic
+    of every face (Crop + Motion per tile, `panel-api-notes.md`).
 - **Subtitles are native captions, never rendered cards.** The user edits them in Premiere.
   - Build the SRT with `subcues.mjs`.
   - Import it, then `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE)`.
