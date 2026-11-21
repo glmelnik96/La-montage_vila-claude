@@ -1,0 +1,162 @@
+# Panel API notes — LLM-Chat_Pr host (`_EXT_PRM_`, v2.14.0)
+
+Live-verified payload contracts for the PremiereBridge/ExtendScript host, captured
+while running the premiere-autopilot pipeline end-to-end against a real project.
+These are the shapes the **host** actually reads — several earlier SKILL.md notes
+did not match, so each call silently no-op'd. Recorded here so the skill (and any
+future caller) targets the real API, and as a bug report for the panel owner.
+
+Verified against extension:
+`%APPDATA%/Adobe/CEP/extensions/com.extensionsllm.chatpr/host/premiere.jsx`
+
+## Discrepancies found (caller shape → host expectation)
+
+1. **addSequenceMarkers** — host reads `timeSec` per row (jsx ~line 2063:
+   `if (typeof m.timeSec !== 'number') continue;`). A payload keyed on `startSec`
+   produces `count:0` with `ok:true`, a silent no-op with no error. It honours `name` and
+   `comment`. It ignores `color`: on host 2.17.0 all 83 markers of one job landed green.
+   Colour them afterwards with `scripts/markercolors.mjs`.
+
+2. **applyVerticalReframe** — host expects
+   `{ newName, targetW, targetH, expectedSequenceName, items:[{trackIndex, clipIndex, scalePct, posX, posY}] }`.
+   It CLONES the whole active sequence into a new one sized `targetW×targetH`, then
+   sets Motion Scale (`scalePct`) and Position (`posX,posY` in [-5..5], 0.5=center)
+   per clip. It does NOT take `nodeId`/`scalePercent`, and it does not trim — trim
+   the clone afterward. `newName` must be unique; `scalePct` in (0,1000], within
+   256–8192 target bounds. A 1920×1080→1080×1920 fill needs `scalePct≈178`.
+
+3. **getVerticalReframeSources** returns per-clip `{trackIndex, clipIndex, name, mediaPath, startSec, endSec, inPointSec}` —
+   **no `nodeId`**. So a reframe plan keyed on `nodeId` cannot be built from its output;
+   use `trackIndex`/`clipIndex`.
+
+4. **applyTimecodeEdits** — host reads `plan.operations` (NOT `plan.ops`), and the
+   interval action string must be `ripple_delete_range` / `lift_delete_range`
+   (also the `_all_tracks` variants). The legacy name `ripple_delete_interval` is
+   not recognized → `opsOk:0`, silent. Each op: `{ type, startSec, endSec }`.
+   Honors optional `expectedSequenceName` guard (rejects if active seq name differs).
+
+5. **importMediaFile** reads `path` (NOT `filePath`), plus optional `binName`
+   (default `AI Renders`). **importAndOverlayOnTop** reads `filePath` AND a
+   REQUIRED `expectedSequenceName` (targets that named sequence, else active).
+   These two sibling calls use different key names for the file path — easy to mix up.
+
+## Correctness bug (caller-side, in ripple sequencing)
+
+`applyTimecodeEdits` applies interval deletes in array order. A ripple delete
+shifts all later content left by its length, so applying intervals low→high makes
+every subsequent interval's coordinates point at already-shifted footage — the
+wrong region gets cut. Observed live: a two-interval reel trim (`[0,30]` then
+`[59,end]`) produced a 59s result instead of 29s because op2 ran in post-shift
+coordinates.
+
+**Fix applied in the skill (`scripts/pr.mjs`):** sort interval ops by **descending
+startSec** before sending to the host, so earlier (higher) deletes never move the
+coordinates of later (lower) ones. Give ORIGINAL-timeline coordinates for every
+interval; never pre-compensate. (Lift deletes don't shift, so descending is a safe
+no-op for them.) If the host ever sorts internally, this becomes redundant but
+still correct.
+
+## Escape hatch: arbitrary host JSX (v2.16.0)
+
+`callBridge('evalJson', ['<ExtendScript expression>'])` runs ANY JSX inside the host
+`$._EXT_PRM_` context. The expression must return `JSON.stringify(...)`. This is how to
+do everything the built-in methods don't expose — **without editing the source repos**.
+Helper: `scripts/_ev.mjs <file.jsx>` runs a host JSX file; `scripts/_pev.mjs <file.js>`
+evals JS in the PANEL (DOM) context, used to click `#btn-transcribe` and read `#err`.
+
+The panel's signature is `evalJson(expr, callback, opts)`. `opts.mutating` turns off its
+cold-start retry, which re-runs a script that answered `EvalScript error.`, `undefined` or
+`''` up to three times. It also raises the timeout from 30 s to 120 s. `opts.timeoutMs` sets
+the timeout outright. `scripts/lib/prbridge.mjs` passes `{mutating: true, timeoutMs}` unless
+told `{mutating: false}`.
+
+Before 2026-09-25 it appended its callback after the arguments, so opts could never reach the
+panel. Every script then ran with a hard 30 s cap and the triple retry. This was verified live
+with a scratch counter.
+
+Things that REQUIRE this escape hatch (the built-ins can't do them):
+
+- **Colored markers.** `addSequenceMarkers` ignores color. Use
+  `seq.markers.createMarker(sec)` → `.name` / `.comments` / `.setColorByIndex(idx)`
+  (0=green, 1=red).
+- **Per-clip durations.** `importAndOverlayOnTop` places on the top track with a DEFAULT
+  duration only. To control it: `track.overwriteClip(projectItem, startSec)`, then take
+  `track.clips[track.clips.numItems-1]` and set `var t=clip.end; t.seconds=endSec; clip.end=t;`.
+- **Adding a video track.** `seq.videoTracks.addTracks(1)` works directly (QE
+  `qe.project.getActiveSequence().addTracks(...)` is the fallback). On Premiere 26.3.2
+  (2026-09-25) `seq.videoTracks.addTracks` is `undefined`; only the QE call exists. Needed because a cloned
+  sequence inherits the source's track count — a 1-video-track source clones to
+  `numVideo:1`, making `seq.videoTracks[1]` **null** ("null is not an object" on placement).
+- **Clone to a working duplicate.** `seq.clone()` returns nothing useful — diff
+  `proj.sequences[*].sequenceID` before/after to find the new one, then set `.name`.
+  Prefer this over `backupActiveSequence`, which renames the CLONE as the backup and then
+  REFOCUSES the original (so you'd be editing the source, violating "работай в дубликатах").
+- **In/Out points.** `proj.activeSequence=seq; seq.setInPoint(0); seq.setOutPoint(endSec);`
+  (seconds). Required before transcription — otherwise the panel reports
+  "Задайте In и Out". Unset In/Out (sentinel `-400000`) does NOT mean "whole sequence".
+  **The Out point also CAPS transcript length** — a too-small Out silently truncates the
+  tail (observed: a 4742s lecture cached as 3811s because a prior run used Out=3811).
+  Always compute `endSec` from the audio track's last clip end and verify the cached
+  `segments[last].endSec` matches before trusting a transcript.
+
+- **Transitions.** `track.transitions` is a collection of the track's transitions (start, end,
+  name); each moves with `move(Time delta)` like a clip. `TrackItem.move()` on a clip does not
+  carry them (2026-10-08). To add one, QE:
+  `qeItem.addTransition(qe.project.getVideoTransitionByName('Cross Dissolve'), true, '00:00:01:05')`
+  puts a 1.2 s dissolve on the head (`false`: the tail). Find `qeItem` among
+  `qe.project.getActiveSequence().getVideoTrackAt(i).getItemAt(k)`, which also lists `Empty`
+  gaps; a QE item has no `inPoint`.
+- **Hiding a clip.** `trackItem.disabled = true` works; it stays on the track, dimmed, and no
+  longer renders.
+- **A new sequence from a preset.** `app.project.newSequence(name, new File(preset).fsName)` with
+  `…/Settings/SequencePresets/HD 1080p/HD 1080p 25 fps.sqpreset` made a 1920×1080 25p stereo
+  sequence (V3 A4) with no dialog (2026-10-09). It returns nothing useful: diff the `sequenceID`s.
+  Add video tracks with QE `addTracks(n, after, 0)`.
+- **Renaming a project item** (`projectItem.name = …`) changes the Project panel only: clips
+  already on a timeline keep the name they were placed with.
+- **A new project.** The panel needs some project open first: open any small one with
+  `propen.mjs`, then `app.newProject(new File(path).fsName)` returns `true` and focuses the new
+  project. Then `app.projects[i].closeDocument(false, false)` on the bootstrap one closes it without
+  saving, and focus stays on the new project (2026-10-16).
+- **A vertical sequence:** the preset `Settings/SequencePresets/Social/Social Media Portrait 9x16 30
+  fps.sqpreset` gives 1080×1920 30p stereo. An iPhone HEVC clip with rotation −90 comes in upright
+  (1080×1920). A Basic Title MOGRT arrives at Text › Scale 56.25 (1080/1920): set it back to 100.
+- **A mosaic tile.** Add the Crop effect with QE `addVideoEffect(qe.project.getVideoEffectByName('Crop'))`.
+  Its Left/Top/Right/Bottom are percent of the SOURCE frame and apply before Motion. So: crop to the
+  face region, Scale = tile width / region width, and Position = tile centre − (region centre −
+  source centre)·scale, normalized to the sequence. All 15 tiles landed on their cells first time.
+- **Swapping a rendered graphic for a new version:** `projectItem.changeMediaPath(new File(p).fsName,
+  true)` (check `canChangeMediaPath()` first). Every clip of the item keeps its place, length and effects,
+  and the next frame export already shows the new media (2026-10-16). Write the new version to a NEW
+  file name: the old one may still be held open by Premiere.
+- **`track.overwriteClip` keeps going past the media.** See SKILL.md «Times»: check `src_in +
+  length` against the duration yourself.
+- **A script must return JSON.** `evalJson` refuses a bare string ("JSON от хоста: …"), even
+  after the work in the script is done.
+
+## Not available (don't try)
+
+- **Frame export on the DOM `Sequence`.** `seq.exportFramePNG` and `seq.exportFrameJPEG` do
+  not exist there; both throw "is not a function". Rendered frames do come out of the host
+  by two other routes:
+  - QE `qe.project.getActiveSequence().exportFramePNG(tc, new File(p).fsName)`, which is
+    wrong past one hour;
+  - `sequence.exportAsMediaDirect` with the JPEG preset over a one-frame In/Out, which works
+    at any time.
+  See SKILL.md «Rendering and looking».
+
+## Transcript cache
+
+`C:/Users/<user>/.extensions_llm_chat_pr/_llm_transcript_cache.json`, keyed by `sequenceID`.
+Each entry: `{ seqName, segments:[{startSec, endSec, text}, ...] }`. The entry only appears
+AFTER normalization completes, so poll for it (`scripts/_poll_cache.mjs <seqId> [maxMin]
+[minLastEnd]` — pass `minLastEnd` to avoid matching a STALE truncated entry from an
+earlier run).
+
+## Methods confirmed working live (v2.14.0)
+
+`getTimelineSnapshot`, `backupActiveSequence`, `getVerticalReframeSources`,
+`applyVerticalReframe`, `addSequenceMarkers`, `applyTimecodeEdits`,
+`importMediaFile`, `importAndOverlayOnTop`, `activateSequenceById`,
+`activateSequenceByName`. Transcript is read from the panel cache
+(`transcribe` needs a one-time in-panel run per sequence).

@@ -1,0 +1,22 @@
+# Per-session scratch: generated JSX, edit plans, transcript dumps, exported frames
+gen-out/
+
+# Client project notes: local only, never pushed
+projects/
+
+node_modules/
+__pycache__/
+*.log
+.DS_Store
+Thumbs.db
+
+# Local Adobe projects, configuration and chat/browser scratch
+/config.json
+.claude/
+.playwright-mcp/
+*.prproj
+*.aep
+*.mov
+*.mp4
+.env
+.env.*

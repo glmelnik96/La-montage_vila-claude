@@ -1,0 +1,14 @@
+{
+  "cdpPort": 8098,
+  "sidecarBaseUrl": "http://127.0.0.1:8765",
+  "repos": {
+    "llmChatPr": "",
+    "phygital": ""
+  },
+  "transcriptCachePath": "",
+  "sidecarTokenPath": "",
+  "sidecarAppDir": "",
+  "pythonExe": "python",
+  "premiereDir": "",
+  "whisperPython": "python"
+}
