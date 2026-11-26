@@ -1,6 +1,9 @@
 // Dump the focused project's sequences: every track item (name, start, end, in, out, media path,
-// nodeId), markers, In/Out. Read-only. The JSON is what gradexml.mjs plans from and what the
-// replace/substitute tools compare against.
+// nodeId; a video item also its speed and 1 if reversed), the transitions of each video track
+// (`vt`: start, end, name), markers, In/Out. Read-only. The JSON is what gradexml.mjs plans from
+// and what the replace/substitute tools compare against.
+// In and out of a speed-changed item are NOT source times: they run in the stretched time of the
+// clip, so the source is in·speed .. out·speed (reversed: mirrored from the media's end).
 //   node scripts/seqdump.mjs --out <file.json> [--seqs "Ролик 1,Ролик 2"]
 import { writeFileSync } from 'node:fs';
 import { callBridge } from './lib/prbridge.mjs';
@@ -18,11 +21,15 @@ const jsx = `(function(){ try {
     var ok=!want; if(want){ for(k=0;k<want.length;k++){ if(want[k]===nm) ok=true; } }
     var rec={name:nm, id:String(s.sequenceID), end:R(Number(s.end)/254016000000), inP:parseFloat(s.getInPoint()), outP:parseFloat(s.getOutPoint())};
     if(ok){
-      rec.v=[]; rec.a=[]; rec.markers=[];
+      rec.v=[]; rec.vt=[]; rec.a=[]; rec.markers=[];
+      try{ rec.fd=s.getSettings().videoFrameRate.seconds; }catch(e5){}
       for(t=0;t<s.videoTracks.numTracks;t++){ var tr=s.videoTracks[t], L=[];
         for(q=0;q<tr.clips.numItems;q++){ c=tr.clips[q]; var mp=''; try{ mp=String(c.projectItem.getMediaPath()); }catch(e1){}
-          L.push([String(c.name), R(c.start.seconds), R(c.end.seconds), R(c.inPoint.seconds), R(c.outPoint.seconds), mp, String(c.nodeId)]); }
-        rec.v.push(L); }
+          var sp=1, rv=0; try{ sp=c.getSpeed(); rv=c.isSpeedReversed()?1:0; }catch(e3){}
+          L.push([String(c.name), R(c.start.seconds), R(c.end.seconds), R(c.inPoint.seconds), R(c.outPoint.seconds), mp, String(c.nodeId), sp, rv]); }
+        rec.v.push(L);
+        var TR=[]; try{ for(q=0;q<tr.transitions.numItems;q++){ var x=tr.transitions[q]; TR.push([R(x.start.seconds), R(x.end.seconds), String(x.name)]); } }catch(e4){}
+        rec.vt.push(TR); }
       for(t=0;t<s.audioTracks.numTracks;t++){ var ta=s.audioTracks[t], A=[];
         for(q=0;q<ta.clips.numItems;q++){ c=ta.clips[q];
           A.push([String(c.name), R(c.start.seconds), R(c.end.seconds), R(c.inPoint.seconds), R(c.outPoint.seconds), '', String(c.nodeId)]); }

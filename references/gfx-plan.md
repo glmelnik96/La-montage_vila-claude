@@ -64,7 +64,7 @@ has no `gfx-plan.json` yet, it starts one with `sequence`, `plate`, `aep` and an
   `lost: true` and is not placed, but it is never deleted.
 - **Several lines of text**: put `\n` inside the string (AE gets `\r`).
 
-## Types (v1)
+## Editorial types and the built-in Cloud.ru kit (v1)
 
 | type | layer | fields (`?` = optional) | in the chat table | planner's minimum |
 |---|---|---|---|---|
@@ -79,6 +79,66 @@ has no `gfx-plan.json` yet, it starts one with `sequence`, `plate`, `aep` and an
 AE checks the exact minimum from the template (entrance + exit + 1.5 s to read) and checks the text
 against the template's boxes. The limits in this table only stop a plan that cannot work; they are
 set to the Cloud.ru kit's own minimums, rounded up.
+
+## A local client kit
+
+A client plan keeps version 1 and the editorial `slot.type` from the table above. Give it a
+style name and a path to a local kit registry. Relative registry paths resolve from the plan's
+directory. Keep the registry, client AEP, footage and fonts in the client's project. This
+workflow accepts 16:9 edits, including documentaries, podcasts, product demos and edits with
+finished AI shots. For a product callout, for example, a `feature_stat` role could map
+`metric` and `unit` to `TXT_STAT` and `TXT_SUFFIX` in its own template.
+
+An example `kits/portrait.json` maps the client role to a template directly under the root
+`TEMPLATES` folder in the film's working AEP.
+
+```json
+{
+  "version": 1,
+  "style": "portrait",
+  "roles": {
+    "nameplate": {
+      "layer": "overlay",
+      "template": "Portrait label",
+      "fields": {
+        "name": { "target": "headline", "required": true },
+        "role": { "target": "byline", "required": false }
+      }
+    }
+  }
+}
+```
+
+For example, set `"style": "portrait"` and `"kit": "kits/portrait.json"` in the plan.
+Keep `sequence`, `plate` and `aep` as in the v1 example. The following slots share a visual role.
+Their editorial types retain their meaning for the edit.
+
+```json
+[
+  { "id": "SP_01", "type": "lower_third", "layer": "overlay", "visualRole": "nameplate",
+    "in": 25, "out": 150, "text": { "name": "Анна Орлова", "role": "Редактор" } },
+  { "id": "CH_02", "type": "chapter", "layer": "overlay", "visualRole": "nameplate",
+    "in": 200, "out": 325, "text": { "name": "Эпилог" } }
+]
+```
+
+A full-screen chapter would use a separate registered role with `layer: "insert"`. The
+registry determines the required fields and target layer for each role. In this example
+`name` writes to `TXT_HEADLINE` and uses the `BOX_HEADLINE` guide for overflow checks.
+An omitted optional `role` clears the byline on the slot's template copy.
+
+Before building, run `gfxplan.mjs preview` from the commands below. Each active slot lists
+its ID, editorial type, layer, visual role, source template and writable fields with values.
+The AE CLI provides the same JSON through `--preview`. Both commands can run with Adobe closed.
+`gfxpreview.py` places a timing box over the plate according to the registered layer. Inspect exact
+geometry, type and ornament on the AE capture.
+
+For the actual build, import the approved design into a separate working AEP and prepare a
+template copy directly in `TEMPLATES` with the registered name. Its top-level
+`TXT_<TARGET>` layers, guide boxes, `in`/`out` markers, 1920×1080 canvas and silent audio
+follow the template contract in ae-motion-live's `reference/gfx-for-edit.md`. Nested or
+animated source-text controls need a template conversion on a copy before the build.
+Offline preview checks the JSON declarations. AE checks the prepared composition.
 
 ## Where graphics go (defaults; the task overrides them)
 
@@ -110,6 +170,8 @@ as cwd.
 | open | `node scripts/propen.mjs --project <path.prproj> [--timeout 240]` | the project focused in Premiere, no clicks |
 | hand over | `node scripts/gfxexport.mjs --seq-id <id> --dir <project folder>/<sequence>_gfx [--no-words] [--lang ru] [--model large-v3]` | `plate.mov`, `edit.json`, `words.json`, and a started `gfx-plan.json` if there was none |
 | check the plan | `node scripts/gfxplan.mjs validate --plan <dir>/gfx-plan.json --edit <dir>/edit.json` | `{ ok, errors, warnings }` |
+| preview mappings | `node scripts/gfxplan.mjs preview --plan <dir>/gfx-plan.json [--only A,B]` | JSON with resolved roles, template names and editable fields |
+| preview mappings (AE root) | `node scripts/gfx-build.js --plan <dir>/gfx-plan.json --preview [--only A,B]` | the same mapping report, offline |
 | chat table | `node scripts/gfxplan.mjs table --plan <dir>/gfx-plan.json` | markdown table |
 | preview | `python scripts/gfxpreview.py --plan <dir>/gfx-plan.json --out <dir>/preview.mp4 --sheet <dir>/preview_sheet.png` | video + sheet for approval |
 | build (AE) | `node scripts/gfx-build.js --plan <dir>/gfx-plan.json [--only A,B] [--refresh-plate] [--rebuild-kit] [--no-capture]` | comps, `.aep` saved, `qa/sheet.png` |

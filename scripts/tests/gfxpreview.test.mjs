@@ -46,3 +46,23 @@ test('boxes stack like the tracks (overlay, logo, insert on top), whatever the p
   assert.ok(logoOnly[0] < 90, `the logo box darkens the plate: ${logoOnly}`);
   assert.ok(Math.abs(underInsert[0] - 0x34) < 20 && Math.abs(underInsert[2] - 0x48) < 20, `the insert covers the logo: ${underInsert}`);
 });
+
+test('an editorial chapter with a client overlay role leaves the picture visible', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'gfxprev-'));
+  const plate = join(dir, 'plate.mov'), out = join(dir, 'preview.mp4');
+  execFileSync('ffmpeg', ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=gray:s=480x270:r=25:d=2',
+    '-c:v', 'libx264', '-pix_fmt', 'yuv420p', plate]);
+  const kit = { version: 1, style: 'portrait', roles: { label: { layer: 'overlay', template: 'Portrait label',
+    fields: { title: { target: 'headline', required: true } } } } };
+  const plan = { version: 1, sequence: { id: 's', name: 'Interview', fps: 25, w: 1920, h: 1080, frames: 50 },
+    style: 'portrait', kit: 'kit.json', plate, aep: join(dir, 'film.aep'), slots: [
+      { id: 'CH_02', type: 'chapter', layer: 'overlay', visualRole: 'label', in: 10, out: 40, text: { title: 'Эпилог' } },
+    ] };
+  writeFileSync(join(dir, 'kit.json'), JSON.stringify(kit));
+  writeFileSync(join(dir, 'plan.json'), JSON.stringify(plan));
+  execFileSync(PY, [join(HERE, '..', 'gfxpreview.py'), '--plan', join(dir, 'plan.json'), '--out', out, '--width', '480']);
+  const before = pixelAt(out, 5, 180, 235);
+  const overlay = pixelAt(out, 20, 180, 235), picture = pixelAt(out, 20, 380, 140);
+  assert.ok(overlay[0] < before[0] - 30);
+  assert.ok(Math.abs(picture[0] - before[0]) < 10);
+});

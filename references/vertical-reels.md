@@ -71,6 +71,30 @@ reads as loud itself. This produced a confident "−18.3 dB, cutting into a word
 alarm on a boundary that was actually sitting in a 70 ms gate. `audio.mjs check`
 reports both resolutions and decides on the fine one; trust `fineDb`.
 
+### Check the whole utterance after snapping
+
+Before rendering an interview select, review every IN and OUT and both sides of
+each internal deletion. Use word-level ASR of the original with at least one
+sentence of context on each side. For an excerpt pass the source second of its
+first sample as `--origin`; a full-master transcript starts at zero. Pass the
+source seconds from the acoustic check, in increasing IN,OUT pairs.
+
+```bash
+node scripts/utterance.mjs --src master.mp4 --words excerpt.words.json --origin 150 --cuts 154.52,162.88,165.40,176.12 --out review.json
+```
+
+Read each edge's timed `before` and `after` words, and the `retainedTail`,
+`omitted` and `retainedHead` at each join. Confirm who is speaking, what each
+pronoun refers to, and whether the retained answer completes the question or
+claim. Review short codas after the first full stop. A quiet cut can still follow
+an unfinished conditional or drop a qualification. Punctuation comes from ASR.
+The tool flags possible cuts inside words and open clauses, and proposes nearby
+punctuated alternatives with a measured pause on the source clock. Missing
+surrounding words produce `unknown`; obtain wider context or verify the source
+by ear. Choose the boundary that conveys the intended point. Quantize to real
+source frames, recheck audio and play across the edited join. Record the first
+estimate, any changed boundary and the reason in the edit notes.
+
 ### When Whisper collapses 30 seconds into one segment
 
 Sometimes a segment arrives with a single start/end spanning half a minute of

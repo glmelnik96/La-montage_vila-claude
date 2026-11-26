@@ -1,6 +1,6 @@
 ---
 name: premiere-autopilot
-description: Use when editing in a live, already-open Adobe Premiere Pro — podcast or interview cuts and vertical reels, syncing cameras to a separate audio recorder, applying reviewer notes and splitting an edit into episodes, laying or replacing a slide deck, interview selects with title cards, a documentary canvas with B-roll and subtitles, After Effects graphics over an edit, grading the footage in DaVinci and putting it back — or when checking the sound, frames or joins of such an edit.
+description: Edit and verify video in Premiere Pro. Use for multicamera podcasts, interview selects, reels, courses and screencasts, documentary and event films, editing generated takes or gameplay captures, graphics from After Effects, review notes and Resolve round-trips. Supports offline checks of exports and profiling the edit rhythm and titles of a series.
 ---
 
 # premiere-autopilot
@@ -9,12 +9,29 @@ Claude makes the editorial decisions. The helpers in `scripts/` apply them to th
 Premiere through the LLM-Chat_Pr panel («ИИ: монтаж», CDP port 8098), and check the result
 offline with ffmpeg and speech recognition. Each script's header comment documents its flags.
 
+## Choose the editorial workflow
+
+| Starting material and deliverable | Route and editorial check |
+|---|---|
+| Podcast or interview recordings → episode, selects or vertical clips | G for camera/recorder sync; F for takes and pickups; A for the episode and C for reframing. Listen across joins, preserve complete thoughts, and check both speakers at angle changes. |
+| Lecture, deck or screencast → course modules or product walkthrough | B/D for slide and screen changes; E for review and episodes. Match each change to what is being explained and read the UI at delivery size. |
+| Documentary, event or promo → story edit and graded master | H for interviews, B-roll and archive; I for AE shots; J for a Resolve return. Check source ranges, framing, dialogue, music, transitions and retimes against the chosen edit. |
+| More episodes of the same series → an edit in the established style | Build a [rhythm and titles profile](references/series-profile.md) from completed episodes. Check its ranges on a separate episode and identify which timings follow the new speaker. For a recurring graphic, pass the approved scene, replacement copy and the new edit cue to the series adaptation route in `ae-motion-live`. |
+| Storyboard, generated takes or gameplay capture → cinematic, trailer or social cut | For newly generated shots, develop the board and references with `ae-motion-live` and use [the generation brief](references/prompting.md). Place the selected take and its usable interval on the edit. For gameplay, [check each delivery crop](references/gameplay-review.md). Follow the action and its result, then watch the four frame edges as the crop moves between marks. Check partial HUD, text and clipped subjects at delivery size. Use I for compositing or titles and E for re-edits. |
+
+For a mixed piece, choose the route per sequence or scene. A course can use interview sound, captured UI and an animated explanation in the same edit. For an offline brief or check, start with the supplied files. Run the Premiere preflight when the task calls for a live timeline.
+
+**Working from media files.** For a flat reference, use [video reference analysis](references/video-reference.md) to locate hard cuts and changes inside a selected picture region. To check two exports against the same edit, use [version review](references/version-review.md) for visual differences, the timing of a title or button, and the offset of a shared soundtrack. Use the same tools on footage from Premiere, AE, a renderer or a game engine. If there is an actual sequence snapshot and the question is about source clips or repeated footage, use the editorial map in Workflow H.
+
+For a local animation change, pass each reading hold from the brief to `version_review.py` with `--hold START:END` (end excluded). Compare the same frame across exports to check the revision, then inspect motion within the hold and confirm the position of fixed lettering at native resolution.
+
+After changing a storyboard or artboard, use [resize review](references/resize-review.md) to find dependent deliverables and inspect both transitions around the changed state. For a looping export, use [loop review](references/loop-review.md) to inspect the last frames followed by the first and check any joins introduced by segmented rendering.
+
 ## Before touching anything
 
-1. **Preflight.** Run `node scripts/preflight.mjs`. It reports `ready:true` when the panel
-   answers, and that is all an edit needs. The Phygital sidecar and its login matter only for
-   paid generation: `preflight.mjs --gen` checks them and reports `genReady`. An expired login
-   is renewed by the user (`python -m scripts.cli auth login` in Phygital-Adobe-Studio/sidecar).
+1. **Live edit preflight.** Run `node scripts/preflight.mjs`. When the panel answers,
+   `ready:true` is sufficient to edit. The optional `--gen` probes the legacy sidecar.
+   For new generated assets use the provider workflow in `ae-motion-live` §6.
 2. **Know which project is focused.** Every host helper acts on `app.project`: whichever
    project Premiere has focused, not the one you used a minute ago. `activeSequence` is
    app-wide, while `app.project.sequences` belongs to one project. Another project is focused
@@ -50,8 +67,7 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
 
 ## Approval
 - Take one backup at the start, then run autonomously.
-- Stop and ask before paid generation: run `gen.mjs … --dry-run` first and wait for the
-  user's yes.
+- Before paid generation, show the model, settings and expected cost and get the user's approval.
 - Stop and ask before anything destructive.
 - Roll back with `pr.mjs activate --by-id <backupId>`.
 - Never edit the two upstream repos (LLM-Chat_Pr, Phygital). What the panel lacks goes
@@ -59,31 +75,37 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
 
 ## Workflows
 
-### A. Podcast or interview → highlight edit, chapters, reels
+### A. Podcast or interview → episode, highlight edit, chapters or reels
 1. Preflight, backup. Then clone the source and activate the clone. Run `pr.mjs snapshot`.
 2. Get a transcript with `pr.mjs transcribe --seq-id <source id>`. A clone has no transcript
    of its own. If `needsTranscription:true` comes back, the user runs the panel's
    transcription once. For word times, transcribe locally (Workflow E, step 1).
-3. Choose the segments of a ~5 min cut:
+3. For a full episode, keep the requested duration, conversation arc and necessary context.
+   Identify pickups, repeated takes and agreed removals. For a highlight cut, select complete
+   segments to the requested length (for example, five minutes) using these editorial weights:
    - story or insight ~0.35 (a complete thought);
    - emotion or energy ~0.25;
    - quotability ~0.20;
    - clarity ~0.15;
    - novelty ~0.05.
 4. Write a `cut` plan of the REMOVED ranges («Payload shapes»).
-   - The transcript decides what to keep; the waveform decides where: `audio.mjs check --src
-     <media> --in <t> --out <t>`, blade in the middle of a pause.
+   - Use `audio.mjs check --src <media> --in <t> --out <t>` to place the cut in a pause.
+     For a file-based quote, pass the snapped IN/OUT pairs and timed words to
+     `scripts/utterance.mjs` as described in [vertical reels, step 2](references/vertical-reels.md).
+     Read the last kept words together with the next words in the source.
+     Check what the first pronoun refers to and whether removing a middle passage changes
+     the claim. If an unfinished clause continues after the pause, move the boundary and
+     check the audio again.
    - `pr.mjs cut --file plan.json`. On a timeout it polls and never re-issues.
    - Then hear every join and look at a frame just after each kept start.
-5. Chapters: 5–10 markers with `pr.mjs markers`, then `markercolors.mjs`. The host ignores
+5. For requested chapters, mark topic changes with `pr.mjs markers`, then `markercolors.mjs`. The host ignores
    `color`.
-6. Reels: Workflow C.
+6. For requested reels, use Workflow C.
 7. Generative inserts are paid.
    - Write the prompts from `references/prompting.md`.
-   - Run `gen.mjs <kind> … --dry-run` and wait for the user's yes.
-   - Generate, then insert with `pr.mjs import`/`overlay`.
-   - The job id is printed first. An interrupted run is collected with `gen.mjs fetch --job`.
-   - A failed generation is reported and skipped.
+   - Use the current provider schema and approval step in `ae-motion-live` §6. Save the job ID and selected file.
+   - Import the chosen take with `pr.mjs import`/`overlay`, or pass it to AE for compositing first.
+   - If the take fails, mark its slot as missing in the edit plan. An existing legacy sidecar job can be recovered with `gen.mjs fetch --job`.
 8. Report the duration, the chapters, the reels, the assets and the `backupId`.
 
 ### B. Lecture + its deck → working copy with slides on V2 and review markers
@@ -127,8 +149,9 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
 5. **Frame each wide shot on its nearest close-up neighbour** (`vframe.mjs plan`), not on the
    reel's dominant angle.
 6. **Verify on pixels:** `checkreframe.mjs --src <media> --seq "<name>"`. Read the image.
-7. **Re-read every boundary in context** with `rewin.py`, ±6 s. A reel opens on a sentence
-   start and closes on a sentence end.
+7. **Re-read every boundary in context** with `rewin.py`, ±6 s. Check the retained sentence
+   across each internal join. At the final OUT, verify that the speaker has finished the
+   thought, including any qualification that follows the pause.
 8. Leave the `_wip` sequences in place and report them.
 
 ### D. Screen-shared lecture + PDF deck → one sequence per slide
@@ -201,7 +224,11 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
    every phrase read twice.
 
 ### G. Cameras + a separate audio recorder → one synced stack
-**REQUIRED:** `references/multicam-sync.md`. The short version:
+**REQUIRED:** `references/multicam-sync.md`.
+For a new batch, run `python scripts/podcastsync.py manifest.json --out sync-review` from this skill.
+Review each clip's proposed recorder take, offset, drift and evidence before placing it.
+The report is an offline proposal. The following procedure describes the original recorder job,
+including how to investigate unresolved clips and verify their placement in Premiere.
 1. **Extract audio** from every camera clip (scratch) and every recorder take, 16 kHz mono.
 2. **Coarse:** a speech-band envelope cross-correlation against every take picks the take and
    the lag.
@@ -217,6 +244,48 @@ offline with ffmpeg and speech recognition. Each script's header comment documen
    structure»).
 
 ### H. Documentary canvas: interview pieces + B-roll + graphics + subtitles
+**Read an existing cut offline.** From the skill root, run the picture map on a saved
+`seqdump`. Select the sequence by ID or exact unique name. Use a fresh output directory.
+
+```sh
+node scripts/docmap.mjs --snapshot dump.json --sequence "Interview edit" --picture-tracks 1-2 --interview-tracks 1-2 --out review/interview-map
+```
+
+For a documentary with the interview on V1, inserts on V2–V3 and full-screen slates above:
+
+```sh
+node scripts/docmap.mjs --snapshot inventory.json --metadata seqdump.json --sequence "Portrait edit" --picture-tracks 1-3 --include-name "^SLATE_" --card-name "^SLATE_" --interview-tracks 1 --broll-tracks 2-3 --out review/portrait-map
+```
+
+- Read `report.md` to follow the camera cuts, source In/Out, repeat pairs and timed notes.
+  `map.json` contains all ranges, placements inside nests, coverage flags and notes by ID.
+  Edit intervals are half-open in whole sequence frames. Source edges are in seconds.
+  Gaps and unresolved items retain their own timeline ranges. The map uses the saved frame
+  rate and sequence In/Out. It reports any fallback to the extent of the sequence.
+- Choose the picture tracks and roles from the edit. Track numbers in the command start at 1.
+  Picture filters apply to the selected sequence. Nested clips follow their own track stack.
+  With no filters all enabled video layers participate. Roles stay unknown until assigned.
+  `--exclude-name` filters matching clip names, `--include-name` admits extra picture
+  layers, and `--interview-name` can qualify interview shots by their resolved label.
+  This also works for interviews with no B-roll. See `node scripts/docmap.mjs --help`.
+- An older flat inventory of saved sequences may need a matching `--metadata` seqdump for
+  the frame duration and In/Out. Optional `--saved-project backup.prproj` reads additional
+  clip timing and disable flags from a matching local saved project with Python 3.
+  Missing track state, unidentified nests, retiming curves, masks and transitions limit
+  what the structural map can establish. Check affected windows on a timeline render.
+- Add `--reference path/to/shots.json` for an independent comparison against a saved shot
+  list and links to its numbered source JPGs. The map compares source frame centres with the
+  old list and distinguishes stills and retime mismatches. The same source path can have
+  multiple disjoint uses. Even a single overlapping source frame counts as an overlap.
+- Sequence markers join automatically. To attach existing dialogue or editorial notes, pass
+  `--notes notes.json` with `{"sequenceId":"<exact ID>","entries":[{"type":"quote","startFrame":40,"endFrame":75,"text":"<verbatim text>","source":"<transcript and cue>"}]}`.
+  Use edit-frame coordinates for this sequence version. Supply `speaker` and `language` when
+  documented. Use `type:"note"` for editorial comments. A point attaches to the containing
+  frame, a span to every intersecting range. Keep the original attribution in `source`.
+- To find unused archive, provide the source catalogue with stable media identities,
+  durations/timebases, keyframes, timecoded descriptions and evidence for the event depicted.
+  Subtract existing uses and inspect candidate frames before proposing a match to dialogue.
+
 1. **Check the sound before building**, because every clone inherits it: the source clips'
    channels (`astats`) and the sequence master («Sound»).
 2. **Plan in code, then watch the plan.** `planpreview.py` renders V1, the B-roll layer, the
@@ -607,9 +676,9 @@ Payloads go in with `--file <payload.json>` or `--json '<payload>'`.
 
 ## Workflow A checklist
 - [ ] preflight `ready:true`; backup `backupId` recorded; working in a clone
-- [ ] highlight cut applied, duration ≈ target, every join heard
-- [ ] chapters on the timeline, in colour
-- [ ] 3–5 reels; crops checked on pixels (`checkreframe.mjs`); boundaries re-read in context
+- [ ] requested episode or highlight cut delivered to the agreed scope; every dialogue join heard
+- [ ] requested chapters checked on the timeline
+- [ ] requested reels checked for framing (`checkreframe.mjs`) and complete sentences at the boundaries
 - [ ] generated assets only after the user's yes
 - [ ] rollback verified: activating `backupId` restores the original
 - [ ] intermediates still present and reported, not deleted on your own initiative

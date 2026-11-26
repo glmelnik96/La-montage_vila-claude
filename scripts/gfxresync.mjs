@@ -18,7 +18,8 @@ import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { resyncSlots, validatePlan } from './lib/gfxcore.mjs';
+import { resyncSlots } from './lib/gfxcore.mjs';
+import contract from './lib/gfx-contract.cjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const arg = (k) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : undefined; };
@@ -30,7 +31,7 @@ const install = (next) => { copyFileSync(PLAN, join(DIR, 'gfx-plan.prev.json'));
 
 if (process.argv.includes('--apply')) {
   if (!existsSync(NEXT)) { console.error(`no ${NEXT}: run gfxresync.mjs --dry-run first`); process.exit(2); }
-  const next = read(NEXT), v = validatePlan(next, read(join(DIR, 'edit.json')));
+  const next = read(NEXT), v = contract.inspectPlan(next, NEXT, read(join(DIR, 'edit.json')));
   if (!v.ok) { console.log(JSON.stringify({ ok: false, replaced: false, valid: v }, null, 2)); process.exit(1); }
   install(next);
   console.log(JSON.stringify({ ok: true, replaced: true, from: NEXT, valid: v, next: NEXT_STEPS }, null, 2));
@@ -38,6 +39,10 @@ if (process.argv.includes('--apply')) {
 }
 
 const plan = read(PLAN);
+if (Object.hasOwn(plan, 'kit') || plan.style !== 'cloudru') {
+  const beforeExport = contract.inspectPlan(plan, PLAN);
+  if (!beforeExport.ok) { console.log(JSON.stringify(beforeExport, null, 2)); process.exit(1); }
+}
 const wordSlots = plan.slots.filter((s) => s.anchor && s.anchor.kind === 'words').map((s) => s.id);
 const pass = ['lang', 'model', 'python'].flatMap((k) => (arg(k) ? [`--${k}`, arg(k)] : []));
 // gfxexport's own output goes to stderr, so stdout carries this script's report only.
@@ -46,7 +51,7 @@ execFileSync(process.execPath, [join(HERE, 'gfxexport.mjs'), '--seq-id', plan.se
 const edit = read(join(DIR, 'edit.json'));
 const words = edit.words ? read(edit.words) : [];
 const r = resyncSlots(plan, words, edit);
-const v = validatePlan(r.plan, edit);
+const v = contract.inspectPlan(r.plan, PLAN, edit);
 const report = { moved: r.moved, lost: r.lost, manual: r.manual, valid: v };
 if (!v.ok || process.argv.includes('--dry-run')) {
   writeFileSync(NEXT, JSON.stringify(r.plan, null, 2));

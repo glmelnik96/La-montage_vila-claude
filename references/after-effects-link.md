@@ -51,6 +51,16 @@ This covers the mechanics only. How a graphics pass fits into a workflow is not 
   bin confirmed it. For a sequence use `app.project.deleteSequence(seq)` (SKILL.md).
 - **Re-import duplicates the item.** A second `importAEComps` of the same comp adds another project item with
   a new `nodeId`. Nothing is updated in place.
+- **A previously exported video frame can stay cached after an AE edit.** In Premiere 26.5.2, a fresh export
+  of frame 75 from a dual-output LED sequence initially showed the previous artwork after hiding its visible
+  AE layer and saving. A first export of adjacent frame 76 already showed full transparency. Keep the
+  original timeline clip, call its project item's `refreshMedia()`, then export the same frame to a fresh
+  path. Allow the video update to propagate and check the decoded pixels before accepting it. In the
+  working AEP, restoring the layer and repeating the export recovered the original 4608×896 frame exactly.
+- **Check the visible sources of a supplied composition.** A delivery comp may display one finished movie
+  while its editable assembly is disabled underneath. Verify the supplied state and use a working duplicate
+  for the editable comparison. Record which layers feed the frame, compare each variant with the delivery
+  master, and bookmark the same source frames on the Premiere timelines.
 - **`getOutPoint()` goes stale on linked items.** After the comp was lengthened from 4 to 5 s and saved, both the
   old item and a fresh re-import still reported 4 s, and `refreshMedia()` (returns true) did not change that.
   The media had grown all the same: a newly placed clip ran 5 s, and the old track item extended to 5 s

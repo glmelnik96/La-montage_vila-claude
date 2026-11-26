@@ -19,9 +19,10 @@ task needs.
 
 ## Non-negotiables
 
-1. **Every operation mutates the user's live project.** There is no dry run and no undo stack
-   you control. Take a backup (`node scripts/pr.mjs backup`, record the `backupId`) before the
-   first mutating call, and confirm with the user before anything destructive.
+1. **Live edit helpers act on the user's open Premiere project.** Take a backup
+   (`node scripts/pr.mjs backup`, record the `backupId`) before the first mutating call, and
+   confirm with the user before anything destructive. Offline media analysis reads the supplied
+   files and writes its reports to the requested output directory. It can run with Premiere closed.
 2. **Check which project is focused first.** `app.project` is whatever Premiere has focused
    right now. If several projects are open, ask the user to close the others rather than
    guessing which one they meant.
@@ -54,7 +55,7 @@ task needs.
   - PyMuPDF for decks;
   - faster-whisper for local transcription.
 - `node scripts/preflight.mjs`: `ready:true` means the panel answers, which is all an edit
-  needs. `--gen` also checks the Phygital sidecar, which only paid generation uses.
+  needs. `--gen` checks the legacy Phygital sidecar when recovering earlier jobs.
 - The shell is bash on Windows. Use forward slashes, and quote paths that contain spaces or
   Cyrillic.
 
@@ -69,11 +70,20 @@ Every script's header comment documents its flags. SKILL.md says which workflow 
   `markercolors`, `fillmono`, `blockcut`.
 - **Audio and transcription:** `audio`, `scan`, `mixdown`, `transcribe_local.py`,
   `transcribe_mixed.py`, `rewin.py`, `splicecheck.py`, `cloudtr`, `cloudsplit`, `cloudedges`,
-  `subcues`.
+  `subcues`. After snapping a quote, `utterance.mjs` shows the kept words, the removed
+  passage and possible sentence boundaries on the source clock (see `references/vertical-reels.md`).
+- **Offline media:** `podcastsync.py` matches camera audio to recorder takes. `video_reference.py`
+  locates cuts and regional motion in a flat reference. `version_review.py` compares two exports.
+  Their input formats and examples are in `references/multicam-sync.md`, `references/video-reference.md`
+  and `references/version-review.md`.
+  For a changed artboard, a loop seam, or a gameplay crop, follow `references/resize-review.md`,
+  `references/loop-review.md`, or `references/gameplay-review.md` respectively.
+  For recurring episodes, `series_profile.py` measures the timing of cuts and titles. See
+  `references/series-profile.md` for learning a profile and checking a separate episode.
 - **Picture:** `shots`, `vframe`, `checkreframe`, `planpreview.py`, `prwindow.ps1`, and the
   slide tools (`slidetrack.py`, `slidealign.py`, `planverify.py`, …).
-- **Generation (paid):** `gen.mjs`. Always run it with `--dry-run` first and get the user's
-  yes.
+- **Generation (paid):** for new shots follow `ae-motion-live` §6, check the provider's
+  current inputs, show the cost and get approval. `gen.mjs fetch --job` recovers legacy jobs.
 - **Grading in DaVinci, Workflow J, `references/grade-roundtrip.md`:** `gradexml` (the grading
   timeline and its FCP XML), `gradexmlcheck.py`, `gradesub` (graded renders back onto V1),
   `tlexport` + `gradeverify.py` (frame-exact check on Rec.709 code values).

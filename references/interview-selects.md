@@ -64,6 +64,12 @@ with the given word.
 
 ## 5. Read every edge back: `scripts/cloudedges.mjs`
 
+For a podcast pull or an interview assembled from several ranges of the same
+source, run the [utterance check after acoustic snapping](vertical-reels.md#check-the-whole-utterance-after-snapping).
+It shows retained and omitted speech on the source clock and offers measured
+alternatives when an edge may split a clause. For pickups from different
+files, check each file on its own clock and audition the assembled join.
+
 Then check every join, rendered from the plan with 4 s either side. This pass found:
 - the interviewer's «угу»/«да» at chunk edges;
 - a next question glued to the end of an answer;
@@ -83,7 +89,20 @@ before import. The script header documents where it lives inside the .mogrt.
 - Every card gets a fresh `capsuleID`.
 - `--template` points at another Premiere version's `Basic Title.mogrt`.
 - After `sequence.importMGT(path, ticks, 0, 0)`, set `end`.
-- Centre the block: Text › Position y = 0.5165 − (lines−1)·0.0356, at 34 characters a line.
+- For a matched series, read the approved timeline clip's normalized **Text › Position**
+  at the held frame. Use the clip with the intended line layout and copy its exact line breaks.
+  Pass them together in the usual `--cards` file, e.g.
+  `{"id":"episode-card","text":"First line\nSecond line","textPosition":[0.5,0.45]}`.
+  The two numbers are fractions of the frame width and height. The builder writes the position
+  to each localized project before import and keeps the supplied lines, including one long
+  line. It supports single-layer, static Premiere Basic Title derivatives. Add `--preserve-style`
+  to keep the uniform donor typography, leading and plate. The script rejects character-specific
+  style changes in this mode. Use the existing font, size and style options for intentional
+  overrides in the usual build mode. Import with a fresh ID,
+  export the held frame from the matching sequence, and compare its text bounds and line
+  positions with the master before making timeline adjustments.
+- For a new layout without an approved master, the original centering estimate was
+  Text › Position y = 0.5165 − (lines−1)·0.0356 at 34 characters a line.
 - Subtitles as graphics: `--fill 0 --bg 16777215 --bg-opacity 80 --bg-size 16` gives black text on
   a white plate. Text that already holds line breaks keeps them. For Onest Bold 44 on 1080p,
   bottom-aligned with the plate's foot at ≈1042 px: Text › Position y = 0.941 for one line,

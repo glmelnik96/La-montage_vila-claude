@@ -1,8 +1,16 @@
 # Prompting reference (gen.mjs)
 
-Guidance for writing prompts for the Phygital sidecar generators. Load this in
-Workflow A step 7 before any paid generation. Fill the **slots**, drop empty ones,
-and keep prompts concrete — name what is in frame, not adjectives about quality.
+For a staged AI film, game cinematic or hybrid edit, start with the
+[shot and take sheet](staged-shots.md). It covers the script beat, timed board,
+reference roles, versioned takes, local media check, adjacent frames and edit handoff.
+An existing board, CSV or edit list can supply those fields directly.
+
+The templates below also serve existing Workflow A callers of `gen.mjs`.
+Its numeric node IDs, flags and sidecar credit preview belong to that wrapper.
+For new production use the official channels and model-specific inputs described
+in `ae-motion-live`, §6 and `reference/generation-recipes.md`. The local shot
+check runs independently of the sidecar. For a prompt, fill the relevant slots,
+drop empty ones and describe what the viewer can see.
 
 ## Node map (defaults in `gen.mjs`)
 - **image** → node `94` (Nano Banana / text-to-image)
@@ -10,7 +18,7 @@ and keep prompts concrete — name what is in frame, not adjectives about qualit
 - **voice** → node `89` (TTS; `--voice <id>`, default `rv5jQF81clh7R2mBDAEQ`)
 - **upscale** → node `87` (`--scale X2|X4`, needs `--in <video>`)
 
-Always `--dry-run` first to preview credits, confirm with the user, then generate.
+For an existing sidecar job, `--dry-run` requests a cost preview before approval.
 
 ## IMAGE prompt template (node 94)
 Order matters — lead with the subject, end with style.
@@ -32,8 +40,8 @@ Tips:
 - Prefer nouns over "high quality / 4k / masterpiece" filler; it rarely helps here.
 
 ## VIDEO prompt template (nodes 74 / 100)
-Video needs an explicit **camera move** and **temporal action**, or the model
-produces a near-still image.
+Specify the **camera behaviour** (locked frame or one deliberate move) and the
+**temporal action**, including the moment the editor can cut on.
 
 ```
 [subject + detail], [what it DOES over the shot], [setting],
@@ -76,7 +84,13 @@ For video also exclude: `stuttering motion, morphing, duplicated subject, camera
 
 ## Checklist before spending credits
 - [ ] Subject is a concrete noun, not only adjectives.
-- [ ] Video prompt has an explicit camera move + a verb of action.
+- [ ] Video prompt specifies camera behaviour and an observable action.
 - [ ] Aspect/framing stated in words if it matters.
-- [ ] Negative prompt covers the usual artifacts.
-- [ ] `--dry-run` cost previewed and user confirmed.
+- [ ] Where supported, the negative prompt addresses a specific visible defect.
+- [ ] Model, settings, output count and estimated cost shown and approved. Existing sidecar users obtain their estimate with `--dry-run`.
+
+## Staged films and game cinematics
+
+Start with the script beat and timed storyboard. Copy the [shot and take sheet](staged-shots.md)
+for each planned cut, including missing shots. It contains the take-selection check and a
+command to extract both neighbouring frames and the current action for editorial review.

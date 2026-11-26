@@ -14,7 +14,8 @@
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { callBridge } from './lib/prbridge.mjs';
-import { validatePlan, pickTracks, placeRows } from './lib/gfxcore.mjs';
+import { pickTracks, placeRows } from './lib/gfxcore.mjs';
+import contract from './lib/gfx-contract.cjs';
 
 const arg = (k) => { const i = process.argv.indexOf(`--${k}`); return i > 0 ? process.argv[i + 1] : undefined; };
 const read = (p) => JSON.parse(readFileSync(p, 'utf8'));
@@ -22,7 +23,7 @@ if (!arg('plan')) { console.error('usage: gfxplace.mjs --plan <gfx-plan.json> [-
 const PLAN = resolve(arg('plan')), DIR = dirname(PLAN);
 const plan = read(PLAN), edit = read(arg('edit') || join(DIR, 'edit.json'));
 const STATE = arg('state') || join(DIR, 'gfx-state.json');
-const v = validatePlan(plan, edit);
+const v = contract.inspectPlan(plan, PLAN, edit);
 if (!v.ok) { console.log(JSON.stringify(v, null, 2)); process.exit(1); }
 if (!existsSync(plan.aep)) { console.error(`no .aep at ${plan.aep}: run ae-motion-live scripts/gfx-build.js first`); process.exit(1); }
 const tracks = pickTracks(edit, plan.aep, existsSync(STATE) ? read(STATE) : null);
