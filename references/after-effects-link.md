@@ -31,6 +31,11 @@ This covers the mechanics only. How a graphics pass fits into a workflow is not 
 
 ## Traps
 
+- **Some existing Premiere `Graphic` track items have `projectItem === null`.** A full-sequence
+  audit must preserve their name/timing/disabled state while guarding both `getMediaPath()` and
+  `nodeId`; guarding the media-path read alone still crashes the dump. Validate the dump result
+  before starting mutations, and stop the shell pipeline on a failed read (live, 2026-11-02).
+
 - **Off-grid times round up.** `overwriteClip(item, 6.5)` at 25 fps (frame 162.5) landed on 6.52 (frame 163).
   AE keeps a layer's `startTime = 6.5` exactly, so the two apps drift half a frame apart. Convert every slot
   to whole frames before either app sees it: `ticks = frames × (254016000000 / fps)`.
@@ -61,6 +66,10 @@ This covers the mechanics only. How a graphics pass fits into a workflow is not 
   while its editable assembly is disabled underneath. Verify the supplied state and use a working duplicate
   for the editable comparison. Record which layers feed the frame, compare each variant with the delivery
   master, and bookmark the same source frames on the Premiere timelines.
+- **The .aep path does not identify a comp.** Every linked comp from the same project returns the same
+  `getMediaPath()`. Match both that path and the exact `<comp>/<aep file name>` when selecting a project
+  item for placement, and read back the placed clip's name as well as its timing. Selecting by the .aep
+  path alone can put the last imported comp into every slot (live-verified 2026-11-02).
 - **`getOutPoint()` goes stale on linked items.** After the comp was lengthened from 4 to 5 s and saved, both the
   old item and a fresh re-import still reported 4 s, and `refreshMedia()` (returns true) did not change that.
   The media had grown all the same: a newly placed clip ran 5 s, and the old track item extended to 5 s

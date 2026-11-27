@@ -160,6 +160,70 @@ Offline preview checks the JSON declarations. AE checks the prepared composition
 - **After each film**, turn the corrections the user made to the plan into rules here (no client
   names).
 
+## Reference-driven design and efficient motion review
+
+Use this pass when matching a supplied design or revising graphics after visual feedback.
+
+- Inspect the actual reference frames and reuse original vector assets. Record the palette,
+  type weights, alignment, motif scale and edge cropping before building. A plausible new style
+  can still miss the reference; successful placement and technical QA do not prove visual fidelity.
+- Start with representative cases: one chapter, one speaker label over the full video frame,
+  and any materially different layout. Render a short motion pilot before propagating a design
+  across many comps. Existing authorization still applies; this does not add an approval gate.
+- Check a speaker label with the face, subtitles and safe margins visible. Source footage is
+  useful for an early study, but does not prove placement over Premiere's final reframe or grade.
+  Label stand-in text/footage and check the actual timeline composite before claiming completion.
+- When applying a new overlay style everywhere, inventory all overlay types as well as speaker
+  labels: a chapter label over footage may share the old card design under a different type.
+  Use a complete manifest across linked AEP files to verify coverage without altering accepted
+  full-screen cards or historical backup sequences (live, 2026-11-03).
+- For an ornament made of broad coloured bands, “draw the lines” can mean growing those bands
+  at their existing width. Do not substitute thin outlines followed by a fill. For circular bands,
+  reveal the original filled paths with angular masks about each arc's centre; for other bands,
+  use a centreline reveal mask wide enough to cover the original shape. Keep the original asset
+  stationary. A whole-pattern wipe or independent rotations change the requested motion/geometry.
+- Inspect early, middle and settled frames as well as playback. Check progression along each
+  band, spacing between starts, intact joins and the final match to the reference. Automatic
+  centre fitting/tracing is a prototype aid: compound shapes and raster edges need visual checks.
+- For varied starts, assign each element a reproducible delay, duration and easing curve once.
+  Do not draw fresh random values inside `seek(t)` or per frame: previews and exports would diverge.
+  When speeding up an entrance, shorten both individual durations and the overall stagger window;
+  keep the settled reading hold. Cubic Bezier easing must solve its x/time coordinate, not simply
+  evaluate its y coordinate at time. Any final asset swap must follow the latest element's finish.
+- A deterministic HTML pilot with explicit `seek(t)` can shorten design iteration when live AE
+  is unavailable. Record it as a pilot, not an installed AE/Premiere change. Port and check the
+  native composition and timeline separately; a standalone preview does not verify Dynamic Link.
+- When porting the pilot to AE, export the original paths together with their final transform
+  matrices, per-element timings and easing parameters. Reuse shared animated precomps across slots
+  instead of rebuilding hundreds of identical masks in each card. Native masks can reveal filled
+  bands without changing the paths. Check intermediate renders against the pilot before batching.
+- For another episode in an approved series, importing the approved AEP into a separate working
+  project and duplicating its comps preserves accepted shapes, eases and element timing more
+  reliably than rerunning an old builder. Inspect actual text/layers first; historical scratch
+  manifests may have stale or damaged strings. After changing `TextDocument.text`, recalculate
+  `sourceRectAtTime` and the text anchor, and fit long labels within the template's safe width.
+  Preserve animated Position keys. Check the nameplate over the actual whole video frame,
+  including subtitles, before importing only the new comp names through Dynamic Link.
+- Full-screen chapter overlays can cover the picture without shifting speech/captions. An
+  appended outro extends only the sequence Out. Verify the existing picture/audio/markers
+  against a fresh dump and the exported dialogue sample-for-sample; a silent outro must add
+  silence rather than duplicated guide audio. These checks were verified on an episodic pass
+  with 12 linked comps (Premiere/AE 2026, 2026-11-12).
+- Caption backing rectangles can accidentally notch a large edge ornament. Inspect the whole
+  settled frame, including negative space; omit a backing shape when the caption already sits over
+  clear background. Preserve archive transparency separately from decorative clipping.
+- Cache reference assets and small extracted metadata. Do not dump screenshot base64 or whole
+  design-context JSON into chat. If screenshot URL retrieval fails but the connector supports
+  base64 image output, request that output and view the image directly.
+- Keep reusable findings here as they are verified. Keep project IDs, scratch paths, rejected
+- AE `TextDocument.tracking` requires an integer. When porting CSS letter-spacing, convert
+  with `Math.round(letterSpacingPx / fontSizePx * 1000)`; a fractional value throws after the
+  text layer has already been created. Resume the owned partial build by finding named layers,
+  rather than blindly rerunning a builder that would duplicate them (live, 2026-11-03).
+- Keep reusable findings here as they are verified. Keep project IDs, scratch paths, rejected
+  versions and current installation status in the project note. State separately what rendered,
+  what was installed, what was visually checked and what the user accepted.
+
 ## Commands
 
 The Premiere steps run with this skill's root as cwd. The AE step runs with the ae-motion-live root

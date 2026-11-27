@@ -84,9 +84,14 @@ Every script's header comment documents its flags. SKILL.md says which workflow 
   slide tools (`slidetrack.py`, `slidealign.py`, `planverify.py`, …).
 - **Generation (paid):** for new shots follow `ae-motion-live` §6, check the provider's
   current inputs, show the cost and get approval. `gen.mjs fetch --job` recovers legacy jobs.
-- **Grading in DaVinci, Workflow J, `references/grade-roundtrip.md`:** `gradexml` (the grading
-  timeline and its FCP XML), `gradexmlcheck.py`, `gradesub` (graded renders back onto V1),
-  `tlexport` + `gradeverify.py` (frame-exact check on Rec.709 code values).
+- **Grading in DaVinci, Workflow J, `references/grade-roundtrip.md`:**
+  - `gradexml`: the grading timeline and its FCP XML. Then `gradexmlfix.py` (natural size, the files' own
+    timecodes) and `gradexmlcheck.py`.
+  - `gradesub`: graded renders back onto V1.
+  - For an edit with speed, reverse, remaps, rotation or dissolves: `gradematch.py` (renders matched by picture),
+    `gradeplace.mjs` (renders back in, speed kept live), `gradeconform.py` + `prprojremap.py` + `prreopen.mjs`
+    (the user's own Time Remapping through the project file), and `gradebake.py` only when a ramp may be baked.
+  - `tlexport` + `gradeverify.py`: frame-exact check on Rec.709 code values.
 - **Graphics (AE), Workflow I, `references/gfx-plan.md`:**
   - `propen.mjs`: opens a project with no clicks from the user;
   - `gfxexport.mjs`: writes the plate, `edit.json` and `words.json`;

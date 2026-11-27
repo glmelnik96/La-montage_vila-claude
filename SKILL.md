@@ -73,6 +73,19 @@ After changing a storyboard or artboard, use [resize review](references/resize-r
 - Never edit the two upstream repos (LLM-Chat_Pr, Phygital). What the panel lacks goes
   through the `evalJson` escape hatch.
 
+## Project cleanup, when explicitly requested
+
+- Build the transitive dependency closure from the working sequences and any selects the
+  user is keeping. Inspect every video/audio track, including disabled clips and reserve
+  material beyond Out; unused by the current In/Out is not the same as unreferenced.
+- Save a standalone `.prproj` backup outside the live project's bins. A backup sequence
+  inside the project does not preserve items removed from the project. Organize with
+  `ProjectItem.moveBin`; do not move physical media or AE asset folders to tidy bins.
+- Before `deleteSequence`/`deleteBin`, validate the approved node-ID manifest against a
+  fresh inventory and reject unexpected descendants or retained references. Afterwards,
+  compare retained timelines and media node/path pairs, then inspect the Project panel.
+  Bin organization was verified to preserve these identities in Premiere 26.5.2.
+
 ## Workflows
 
 ### A. Podcast or interview → episode, highlight edit, chapters or reels
@@ -344,16 +357,34 @@ ae-motion-live §5e. The short version:
    - `--mode visible` keeps only what no full-frame still covers. That was 0.9 of 24.7 min on
      one course.
    - `--mode all` keeps every piece.
+   - A camera on several tracks, or a UHD camera in a 1080p edit: `--tracks 1,2 --media "\.braw$"
+     --pack 1 --source-size --copy-markers` (`references/grade-roundtrip.md`, section 2).
+   - Speed changes, reverses and ramps: every piece at 100 % over the source it shows. Add
+     `--fps <camera rate>` and `--size-from`. Read ramps off a render (`--ranges`).
+   - An anamorphic override comes out as Scale 133 plus Distort: run `gradexmlfix.py` on
+     Premiere's export.
    - Then check the XML against the plan with `gradexmlcheck.py`.
 3. **The user renders Individual clips.** File names must carry the source name and the source
-   timecode in frames.
+   timecode in frames. If they render the grading timeline as ONE file instead, pass it as
+   `--single`: its black gaps must fall on the plan's gaps.
 4. **Snap the episodes to the frame grid first** with `gridfix.mjs --fix`, then run
    `gradesub.mjs`:
    - match every render by source + timecode, and check its frame count;
    - make backups;
-   - place the video only (the render's own audio goes to an empty track and is removed);
+   - place the video only (the render's own audio goes to an empty track and is removed), each
+     piece on its own track;
+   - copy each old item's Motion and effects onto its render (`fx`, `props`), for an edit that
+     scales or crops the camera;
    - check every track against the snapshot.
-5. **Verify on code values:** `tlexport.mjs` (a Rec.709 H.264 export) and `gradeverify.py`.
+   - **An edit with speed, reverse, ramps, rotation or dissolves:** match the renders by picture
+     (`gradematch.py`), then `gradeplace.mjs`. Speeds stay live: QE `setSpeed`, and the user's own Time
+     Remapping keys through the project file (`gradeconform.py` + `prprojremap.py`, with their OK to close the
+     project). Never bake a ramp. Override a Gamma 2.2-tagged render to its camera's colour space.
+     `references/grade-roundtrip.md`, section 4b.
+5. **Look at the retouched spots with the shadows ×3.** Retouch remnants 1–3 % above black are
+   hidden by Premiere's viewer and shown by players. Fix them in place: `references/grade-roundtrip.md`,
+   section 6.
+6. **Verify on code values:** `tlexport.mjs` (a Rec.709 H.264 export) and `gradeverify.py`.
    Each frame must match its own frame of the render (Y difference ≈0.3) better than both
    neighbours. Do not compare JPEG exports: they carry a Rec.709→sRGB conversion.
 
@@ -427,6 +458,21 @@ ae-motion-live §5e. The short version:
   below shows through (2026-10-09). Check `src_in + length ≤ media duration` in the plan.
 - **A 30 fps source reports its in-points on its own 1/30 s grid.** Compare with a 0.05 s
   tolerance. That lets a piece one 25p frame off pass: remove it and re-place it.
+- **The in/out of a speed-changed clip are not source times** (Premiere 26.5, proved on pixels on
+  2026-10-28). They run in the clip's stretched time, so `out − in` equals the timeline length:
+  - the source shown is `in·speed .. out·speed` (`getSpeed()`: 0.5 for 50 %);
+  - a reversed clip (`isSpeedReversed()`) is mirrored from the media's end: the first frame shown
+    is `D − in·speed − 1 edit frame`, the last `D − out·speed − (1 − speed)·frame`;
+  - a clip at 1 % read `in` 3560 s in a 66 s phone file: the source is 35.6 s.
+- **Time Remapping is invisible to the DOM.** A speed ramp reports `getSpeed()` 1 and plain
+  in/out, and its components list only Opacity and Motion. Three clips of 71 had it. The tells: a
+  range past the media's end (`in` 16.72 s in a 13.92 s file), or frames that do not follow the
+  formula. Read the truth off a render: match every frame to the source.
+- **A display-matrix rotation is honoured by Premiere and Resolve alike, and by ffmpeg's autorotate.** A GH6 file
+  flagged `rotation=90` (written during a spin) showed portrait. The editor had turned it back with Motion
+  › Rotation 90 (and Scale Width 52.73). Resolve rendered it portrait too, 2160×4096. The render takes the
+  clip's own Motion and needs no extra turn: a second +90 on top gave 180 (2026-10-28). For frame matching,
+  decode the source with `-noautorotate` and transpose the render back.
 - **Clones inherit the source's In/Out**, sometimes the unset sentinel −400000. Set every new
   sequence to `[0, end]`, or its export runs hours of black.
 - **Rename, do not delete, when re-cutting.** `_OLD_…`, rebuild, verify, then ask before
@@ -526,8 +572,54 @@ ae-motion-live §5e. The short version:
 - **Remix music can be lengthened by script.** `outPoint` + `end` on a Remix piece continues the
   remix: the old part stayed bit-identical and the new tail was the remix's own continuation
   (2026-10-08). The Remix data lives in `<RemixClip>` of the prproj; its in/out are remix time.
+- **A voice chain by script.** QE `addAudioEffect` appends to the end of the clip's chain; the DOM
+  reads the parameters normalized 0–1. Calibrated on renders (2026-10-27):
+  - Amplify › Gain: dB = 144·v − 96 (0.667 is 0 dB). It goes past +15 dB, which Volume cannot.
+  - Highpass › Cutoff ≈ 32000·v² Hz. **Its default 0.25 is about 2 kHz**: always set it (0.053 ≈ 90 Hz).
+  - Hard Limiter › Maximum Amplitude: dB = 100·(v − 1). Single-band Compressor › Gain: dB = 60·(v − 0.5);
+    Threshold v = 1 + dB/60; Ratio 0.069 compressed speech frames about 2–2.5:1.
+  - To put a stage before a limiter that is already there, bypass it (`properties[0]` = true) and
+    append the stage and a new limiter.
+  - A mono clip (a lav WAV) on a stereo track plays 3 dB down per channel. Its levels and its
+    limiter ceiling before the panner sit 3 dB higher than a stereo clip's.
+  - Each clip under its own limiter can still clip in the sum: no script reaches the master
+    track. Find the overs in a render (samples above 0.95) and fix the clips that meet there.
+- **A chain copied from another clip carries that clip's Amplify.** Amplify is per take (target − the
+  take's speech level), so it is not part of the chain. A studio clip's +24.1 dB, pasted onto the
+  open-space pieces, left them 3–4 dB under the studio (2026-10-27). After a paste, set Amplify per
+  piece by the rule, then measure the render.
+- **Measure a short piece on its speech only.** Take the momentary loudness of the frames inside its
+  speech intervals. «Within 15 dB of the loudest» read a 1.8 s piece holding 0.5 s of speech 4 dB low.
+- **Lift soft words with keys, not the whole piece.** Raising the piece raises its room tone, which then
+  steps at every cut. Amplify keys on the words alone (60 ms in, 80 ms out) lifted a spoken list by
+  3 dB with no step.
+- **Check lip sync wherever a camera's own sound is under its picture.** The two in-points of one file
+  must agree at the same timeline time. A camera piece placed by hand came in one frame late (40 ms).
+- **Ducking music under the voice.**
+  - **Look at a ducking that is already there before keeping it.** Compare its keys with the starts on
+    A1 and on the effects tracks. A user's auto-ducking dipped the music under every SFX plate and
+    stayed up under speech: the voice clips were not the type it ducked against (2026-10-27).
+  - **Find speech in the sources of the A1 pieces, not at clip edges.** Pieces hold pauses, and lapses
+    hold none. Use 10 ms frames above the piece's floor + 9 dB (or its loudest − 30 dB) and merge
+    gaps under 0.35 s.
+  - What worked on a course:
+    - the bed under speech ~23 dB under the voice (median);
+    - +9 dB in pauses of 2.5 s and more, +5 dB in pauses of 1.6–2.5 s;
+    - up over 0.6 s, from 0.2 s after a phrase; down over 0.45 s, ending 0.1 s before the next one;
+    - a sting under a title kept at full level, down to the bed before the first word, and up again
+      after the last word for the logo.
+  - **Amplify has a slider per channel:** Left, Right and 31 unnamed (`properties[3…35]`). A mono voice
+    uses Left. On music, key every slider: the auto-ducking had keyed them all.
+  - Amplify keys interpolate in dB. Volume › Level keys interpolate the amplitude.
+  - The music's own momentary loudness plus its clip keys predicted the render within 0.1 dB
+    (median) wherever only music played. Check the plan this way before rendering.
 
 ### Transcription and cut points
+- **A read-back of a whole piece hides restarts and fillers.** It merged a false start
+  («Для того чтобы Дора могла работать… Для того чтобы Дора могла работать с…») into one
+  sentence, and it dropped «да-да-да» at the head of a take (2026-10-27, both caught by the
+  user). Read every piece back island by island (split at pauses over 0.35 s, each island
+  alone), and look hardest at the first island of each piece.
 - **Transcript = WHAT; waveform = WHERE.** Whisper times drift up to ~1 s: word starts after
   a pause come early, word ends come late.
   - Put the blade in the middle of a measured pause, at least 0.08 s from speech on both
@@ -567,8 +659,13 @@ ae-motion-live §5e. The short version:
 - **Two people in one clip: who says what.** Per word, the median pitch splits a man (90–145 Hz)
   from a woman (180–280 Hz). For two men, compare the frame difference inside each mouth box per
   phrase: the speaker's mouth moves 3–4×, the listener's under 1.
-- **Re-read every boundary in context** (`rewin.py`, ±6 s). Open on a sentence start, close
-  on a sentence end. A blade in a clean pause can still be in the wrong pause.
+- **Listen to both sides of every edited dialogue boundary.** Before cutting, hear the
+  source in context and identify the intended take, including the first and last words
+  of the complete thought. After cutting, listen across each join in the actual sequence
+  or its audio export. Check that every intended word is intact and that discarded takes,
+  stray replies, and repeats are gone. Use `rewin.py` (±6 s) and the waveform to locate the
+  edge. If you hear an incomplete or unwanted line, adjust the cut and listen again before
+  delivery.
 
 ### Rendering and looking
 - **Rendering from a script:** `sequence.exportAsMediaDirect(dest, preset, range)`.
@@ -580,6 +677,9 @@ ae-motion-live §5e. The short version:
     - `3F3F3F3F_41494646/AIFF 48kHz.epr` for audio (then `astats`);
     - `3F3F3F3F_4A504547/JPEG Sequence (Match Source).epr` for frames. It appends a `0` to
       the name.
+    - **A deliverable MP4:** `4E49434B_48323634/01 - Match Source - High bitrate.epr` (H.264,
+      the sequence's size and rate, ~19 Mbit/s). The «H264 Match Source - High bitrate» under
+      `3F3F3F3F_4D6F6F56/` is QuickTime and writes a .mov.
   - The bridge may give up while the render runs: wait for the file to stop growing.
   - Put In/Out and mute changes on a throwaway clone and `deleteSequence` it afterwards.
 - **A frame.**
@@ -614,6 +714,15 @@ ae-motion-live §5e. The short version:
   Y planes.
 
 ### Canvas quality
+- **Motion scales a MOGRT about the frame's centre**, so a plate that hugs a corner drifts away from
+  it as it grows. To grow it in place, keep the corner fixed:
+  `Position = corner − s·(corner − centre)` (frame pixels, then normalised).
+  - On 2026-10-27 a user set one plate to 126 % and moved its Position x so the left edge went from
+    52 to 96 px. The rest went to 125 % by the same rule.
+  - The exceptions: plates inside a split layout's speaker window grew from their own lower left
+    corner, so they stayed in the window (the rule would have hung them 60–80 px below it). The
+    lower third grew from its own corner, or it would have reached y 1035.
+  - Measure each plate's box on a frame before and after: the brand green is 38/208/124.
 - **B-roll variety is about places and subjects, not clip ids.**
   - A layer that used every clip once still read as repetition: four shots of one entrance,
     three of one desk.
@@ -642,6 +751,9 @@ ae-motion-live §5e. The short version:
   - Import it, then `seq.createCaptionTrack(item, 0, Sequence.CAPTION_FORMAT_SUBTITLE)`.
   - `captionTracks` is not exposed; QE frames show the captions.
   - Font and plate are set in Track Style.
+  - To match a user-corrected film, inspect a current rendered frame and its live Properties,
+    not an old export or the first font string in the project XML. For bulk native-caption
+    styling through Windows UI, see `references/native-caption-style.md`.
   - **When the user has turned them into Graphic clips** (Essential Graphics text), their text is
     FlatBuffers inside the prproj: not scriptable. Rebuild them as one .mogrt per cue with
     `mogrtcard.py --fill … --bg …` (text colour, plate) at the old clips' times, place with

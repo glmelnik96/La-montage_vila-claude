@@ -133,6 +133,38 @@ Things that REQUIRE this escape hatch (the built-ins can't do them):
   length` against the duration yourself.
 - **A script must return JSON.** `evalJson` refuses a bare string ("JSON от хоста: …"), even
   after the work in the script is done.
+- **Fields of an AE-made MOGRT** (the Cloud.ru BrandKit ones). `clip.getMGTComponent()`, then find the
+  parameter by display name.
+  - Text: `getValue()` is JSON. Set `textEditValue` and `fontTextRunLength: [len]`, then `setValue(JSON, 1)`.
+  - A dropdown takes the 0-based option index. library.json numbers its options from 1: subtract 1
+    (2026-10-27; with the library numbers every plate came out in the next style).
+  - Trim the clip with `outPoint` first, then `end`.
+- **A variable-frame-rate screen recording** (macOS, H.264) plays at its real frame timestamps. Premiere
+  reports the average rate (32.07 fps) but showed every window switch within one 25p frame of ffmpeg
+  (2026-10-27). Sync it to the audio like any other source.
+- **Do not speed clips up with QE `setSpeed`.** `setSpeed(k, '', false, false, false)` keeps the clip's
+  length and stretches the source under it, but the speed it lands on is unreliable (2026-10-27):
+  - on a variable-frame-rate recording it gave 1.2–4.9 instead of 3–16, the further into the file the worse;
+  - on a 25p H.264 copy ×4 was exact, ×6 came out 5.4, and ×16 also shortened the clip;
+  - a subclip did not take the speed at all.
+  Bake the speed into a copy instead (ffmpeg `setpts=(PTS-STARTPTS)/k,fps=25`) and place it at 100 %.
+- **Motion keyframes** (a push-in): `prop.setTimeVarying(true)`, then for each key `prop.addKey(t)` and
+  `prop.setValueAtKey(t, v, true)`. `t` is media seconds, i.e. the clip's `inPoint` plus the time in the
+  clip. Position keys take the normalized pair. A move split over two clips must continue across them:
+  give each clip the interpolated values at its own ends.
+- **Motion has its own Crop** in 26.x: Crop Left/Top/Right/Bottom are `properties[7..10]` of Motion.
+- **Text typed into a screen insert, word by word** (a request dictated into a chat; 2026-10-27):
+  - a white box over the field's placeholder;
+  - a left-aligned Basic Title (`mogrtcard.py --align 0`, the UI's font) set by Text › Position;
+  - keys on Motion › Crop Right, one per word on the word's time, `setInterpolationTypeAtKey(t, 4)` (hold).
+  The words' right edges come from the font's advance widths, scaled to the width measured on a render.
+- **A MOGRT's media slot cannot be filled by script** (Media Replacement, e.g. the BrandKit cover's «Визуал»).
+  Import the picture and ask the user to drag it onto the slot in Properties.
+- **Cutting a product shot out of its background:** Photoshop over COM does it in seconds, with clean edges
+  on a light seamless background (2026-10-27). From PowerShell, `New-Object -ComObject Photoshop.Application`,
+  then `DoJavaScript`: open the file, clear `isBackgroundLayer`,
+  `executeAction(stringIDToTypeID("removeBackground"), new ActionDescriptor(), DialogModes.NO)`, then
+  `saveAs(PNGSaveOptions)`.
 
 ## Not available (don't try)
 
